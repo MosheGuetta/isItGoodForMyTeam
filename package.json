@@ -1,0 +1,13 @@
+{
+  "name": "is-that-good-for-my-team",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EuroLeague team outcome app with a small Node server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

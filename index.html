@@ -1,0 +1,101 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Is It Good For My Team?</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-header">
+  <div class="app-title-row">
+    <span class="app-ball">🏀</span>
+    <div>
+      <div class="app-title">Is It Good For My Team?</div>
+      <div class="app-subtitle" id="appSubtitle">EuroLeague 2025-26</div>
+    </div>
+  </div>
+  <div class="header-status" id="headerStatus"></div>
+</div>
+
+<main class="app-shell">
+<section class="screen active" id="screen-auth">
+  <div class="auth-screen">
+    <div class="auth-hero">
+      <div class="auth-kicker">Mobile-first onboarding</div>
+      <h1>Start with your account.</h1>
+      <p>Use one clean login/register screen in mobile and web, then continue into your team setup.</p>
+    </div>
+    <div class="auth-card">
+      <div class="auth-toggle">
+        <button class="auth-mode-btn active" id="loginModeBtn" onclick="setAuthMode('login')">Log In</button>
+        <button class="auth-mode-btn" id="registerModeBtn" onclick="setAuthMode('register')">Register</button>
+      </div>
+      <div class="auth-fields">
+        <label class="field-label" for="authName">Name</label>
+        <input class="app-input" id="authName" type="text" placeholder="Moshe" />
+      </div>
+      <div class="auth-fields">
+        <label class="field-label" for="authEmail">Email</label>
+        <input class="app-input" id="authEmail" type="email" placeholder="you@example.com" />
+      </div>
+      <div class="auth-fields">
+        <label class="field-label" for="authPassword">Password</label>
+        <input class="app-input" id="authPassword" type="password" placeholder="••••••••" />
+      </div>
+      <p class="auth-note" id="authModeCopy">Welcome back. Log in to keep your saved team context across devices later.</p>
+      <div class="auth-error" id="authError"></div>
+      <button class="primary-btn auth-submit" onclick="submitAuth()"><span id="authSubmitLabel">Continue</span></button>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="screen-setup">
+  <div class="setup-shell">
+    <div class="setup-intro">
+      <div class="auth-kicker">Step 2 of 2</div>
+      <h2>Choose your team and goal.</h2>
+      <p>Your selection shapes the analysis, standings highlights, schedule emphasis, and player context.</p>
+    </div>
+    <div class="panel">
+      <div class="section-title highlight-title">Choose Your Team</div>
+      <div class="team-grid" id="teamGrid"></div>
+    </div>
+    <div class="panel goal-section">
+      <div class="section-title highlight-title">Choose Your Goal</div>
+      <div class="goal-btns">
+        <button class="goal-btn playoffs" onclick="selectGoal('playoffs')">Playoffs<br><small>Top 6</small></button>
+        <button class="goal-btn playin" onclick="selectGoal('playin')">Play-In<br><small>Top 10</small></button>
+      </div>
+    </div>
+    <button class="primary-btn" onclick="completeSetup()">Enter App</button>
+  </div>
+</section>
+
+<section class="screen" id="screen-app">
+<div class="tabs">
+<button class="tab-btn active" onclick="switchTab('analysis')">📊 Analysis</button>
+<button class="tab-btn" onclick="switchTab('standings')">🏆 Standings</button>
+<button class="tab-btn" onclick="switchTab('schedule')">🗓️ Schedule</button>
+<button class="tab-btn" onclick="switchTab('players')">👥 Players</button>
+</div>
+<div id="tab-analysis" class="tab-content active">
+<div class="analysis-toolbar">
+  <div id="analysisSummary"></div>
+  <div class="analysis-actions">
+    <button class="secondary-btn" id="logoutBtn" onclick="logout()">Log Out</button>
+    <button class="secondary-btn" onclick="goToSetup()">Change Team / Goal</button>
+    <button class="primary-btn compact-btn" onclick="runAnalysis()">Refresh Analysis</button>
+  </div>
+</div>
+<div id="analysis-result"></div>
+</div>
+<div id="tab-standings" class="tab-content"><div id="standings-content"></div></div>
+<div id="tab-schedule" class="tab-content"><div id="schedule-content"></div></div>
+<div id="tab-players" class="tab-content"><div id="players-content"></div></div>
+</section>
+</main>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

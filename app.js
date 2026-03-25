@@ -1,0 +1,1055 @@
+﻿// Baked-in data (no network needed)
+const GAMES_DATA = window.__GAMES__;
+const CLUBS_DATA = window.__CLUBS__;
+const STATS_DATA = window.__STATS__;
+const META_DATA  = window.__META__;
+const MEDALS = ['1.','2.','3.','4.','5.'];
+// Keep the bundled snapshot aligned with the known official order when live data is unavailable.
+const SNAPSHOT_STANDINGS_OVERRIDES = {
+  ULK: 1,
+  OLY: 2,
+  MAD: 3,
+  PAM: 4,
+  HTA: 5,
+  ZAL: 6,
+  MCO: 7,
+  PAN: 8,
+  BAR: 9,
+  RED: 10,
+  DUB: 11,
+  TEL: 12,
+  MIL: 13,
+  VIR: 14,
+  PRS: 15,
+  MUN: 16,
+  PAR: 17,
+  IST: 18
+};
+
+const APP = {
+  currentScreen: 'auth',
+  authMode: 'login',
+  sessionToken: localStorage.getItem('igtmt-session-token') || '',
+  currentUser: null,
+  selectedTeam: null,
+  selectedGoal: null,
+  allGames: GAMES_DATA,
+  clubs: CLUBS_DATA,
+  standings: [],
+  seasonStats: STATS_DATA,
+  playerMeta: META_DATA,
+  officialStandingsTable: SNAPSHOT_STANDINGS_OVERRIDES,
+  officialStandingsStats: null,
+  liveMeta: null,
+  authBusy: false
+};
+
+// Init
+async function init() {
+  await patchPlayerTeams();
+  await loadLiveData();
+  const calculatedStandings = calcStandings(APP.allGames, APP.officialStandingsTable);
+  APP.standings = mergeStandings(calculatedStandings, APP.officialStandingsStats);
+  renderTeamGrid();
+  renderScreen();
+  setAuthMode(APP.authMode);
+  await restoreSession();
+  renderStandings();
+  renderSchedule();
+  renderPlayers();
+}
+
+// Tabs
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) =>
+    b.classList.toggle('active', ['analysis','standings','schedule','players'][i] === name));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name === 'standings') renderStandings();
+  if (name === 'schedule') renderSchedule();
+  if (name === 'players') renderPlayers();
+}
+
+function renderScreen() {
+  document.querySelectorAll('.screen').forEach(screen => {
+    screen.classList.toggle('active', screen.id === `screen-${APP.currentScreen}`);
+  });
+  updateHeaderStatus();
+  renderAnalysisSummary();
+  renderAuthState();
+}
+
+function updateHeaderStatus() {
+  const subtitle = document.getElementById('appSubtitle');
+  const status = document.getElementById('headerStatus');
+  if (!subtitle || !status) return;
+
+  if (APP.currentScreen === 'auth') {
+    subtitle.textContent = 'EuroLeague 2025-26';
+    status.innerHTML = '<span class="header-pill">Step 1: Account</span>';
+    return;
+  }
+
+  if (APP.currentScreen === 'setup') {
+    subtitle.textContent = APP.currentUser ? `Welcome, ${APP.currentUser.name}` : 'EuroLeague 2025-26';
+    status.innerHTML = '<span class="header-pill">Step 2: Team + Goal</span>';
+    return;
+  }
+
+  const team = APP.selectedTeam ? displayTeamName(APP.selectedTeam) : 'No team selected';
+  const goal = APP.selectedGoal === 'playoffs' ? 'Playoffs' : APP.selectedGoal === 'playin' ? 'Play-In' : 'No goal';
+  subtitle.textContent = APP.currentUser ? `${APP.currentUser.name}'s dashboard` : 'EuroLeague 2025-26';
+  status.innerHTML = `<span class="header-pill">${team}</span><span class="header-pill muted-pill">${goal}</span>`;
+}
+
+function renderAnalysisSummary() {
+  const el = document.getElementById('analysisSummary');
+  if (!el) return;
+  if (!APP.selectedTeam || !APP.selectedGoal) {
+    el.innerHTML = '<div class="analysis-chip">Pick a team and goal to start.</div>';
+    return;
+  }
+
+  const goalText = APP.selectedGoal === 'playoffs' ? 'Top 6 goal' : 'Top 10 goal';
+  el.innerHTML = `
+    <div class="analysis-chip strong-chip">${displayTeamName(APP.selectedTeam)}</div>
+    <div class="analysis-chip">${goalText}</div>
+  `;
+}
+
+function renderAuthState(message = '') {
+  const errorEl = document.getElementById('authError');
+  const submitEl = document.getElementById('authSubmitLabel');
+  const logoutEl = document.getElementById('logoutBtn');
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.style.display = message ? 'block' : 'none';
+  }
+  if (submitEl) {
+    submitEl.textContent = APP.authBusy ? 'Please wait...' : 'Continue';
+  }
+  if (logoutEl) {
+    logoutEl.style.display = APP.currentUser ? 'inline-flex' : 'none';
+  }
+}
+
+function setAuthMode(mode) {
+  APP.authMode = mode;
+  document.getElementById('loginModeBtn')?.classList.toggle('active', mode === 'login');
+  document.getElementById('registerModeBtn')?.classList.toggle('active', mode === 'register');
+  const note = document.getElementById('authModeCopy');
+  const nameField = document.getElementById('authName');
+  if (note) {
+    note.textContent = mode === 'login'
+      ? 'Welcome back. Log in to keep your saved team context across devices later.'
+      : 'Create a simple account flow now. We can wire real authentication later.';
+  }
+  if (nameField) {
+    nameField.parentElement.style.display = mode === 'register' ? 'block' : 'none';
+  }
+  renderAuthState('');
+}
+
+async function apiRequest(url, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
+  if (APP.sessionToken) headers.Authorization = `Bearer ${APP.sessionToken}`;
+  const response = await fetch(url, { ...options, headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || 'Request failed.');
+  }
+  return payload;
+}
+
+function setSession(token, user) {
+  APP.sessionToken = token || '';
+  APP.currentUser = user || null;
+  if (APP.sessionToken) {
+    localStorage.setItem('igtmt-session-token', APP.sessionToken);
+  } else {
+    localStorage.removeItem('igtmt-session-token');
+  }
+}
+
+function applyUserPreferences(user) {
+  const preferences = user?.preferences || null;
+  APP.selectedTeam = preferences?.team || null;
+  APP.selectedGoal = preferences?.goal || null;
+  renderTeamGrid();
+  document.querySelectorAll('.goal-btn').forEach(btn => btn.classList.remove('selected'));
+  if (APP.selectedGoal) document.querySelector(`.goal-btn.${APP.selectedGoal}`)?.classList.add('selected');
+  renderAnalysisSummary();
+  updateHeaderStatus();
+}
+
+async function restoreSession() {
+  if (!APP.sessionToken) return;
+  try {
+    const payload = await apiRequest('/api/auth/session', { method: 'GET', headers: {} });
+    setSession(APP.sessionToken, payload.user);
+    applyUserPreferences(payload.user);
+    APP.currentScreen = payload.user?.preferences ? 'app' : 'setup';
+    renderScreen();
+    if (APP.currentScreen === 'app') {
+      renderStandings();
+      renderSchedule();
+      renderPlayers();
+      runAnalysis();
+    }
+  } catch (_) {
+    setSession('', null);
+    APP.currentScreen = 'auth';
+    renderScreen();
+  }
+}
+
+async function submitAuth() {
+  const nameInput = document.getElementById('authName');
+  const emailInput = document.getElementById('authEmail');
+  const passwordInput = document.getElementById('authPassword');
+  const email = emailInput?.value.trim();
+  const password = passwordInput?.value.trim();
+  const enteredName = nameInput?.value.trim();
+
+  if (!email || !password) {
+    renderAuthState('Enter email and password.');
+    return;
+  }
+  if (APP.authMode === 'register' && !enteredName) {
+    renderAuthState('Enter a name to register.');
+    return;
+  }
+
+  APP.authBusy = true;
+  renderAuthState('');
+  try {
+    const endpoint = APP.authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
+    const payload = await apiRequest(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ name: enteredName, email, password })
+    });
+    setSession(payload.token, payload.user);
+    applyUserPreferences(payload.user);
+    APP.currentScreen = payload.user?.preferences ? 'app' : 'setup';
+    renderScreen();
+    if (APP.currentScreen === 'app') {
+      renderStandings();
+      renderSchedule();
+      renderPlayers();
+      runAnalysis();
+    }
+  } catch (error) {
+    renderAuthState(error.message);
+  } finally {
+    APP.authBusy = false;
+    renderAuthState(document.getElementById('authError')?.textContent?.trim() || '');
+  }
+}
+
+async function completeSetup() {
+  if (!APP.selectedTeam) { alert('Select your team!'); return; }
+  if (!APP.selectedGoal) { alert('Select your goal!'); return; }
+  try {
+    const payload = await apiRequest('/api/user/preferences', {
+      method: 'PUT',
+      body: JSON.stringify({ team: APP.selectedTeam, goal: APP.selectedGoal })
+    });
+    APP.currentUser = payload.user;
+  } catch (error) {
+    alert(error.message);
+    return;
+  }
+  APP.currentScreen = 'app';
+  renderScreen();
+  renderStandings();
+  renderSchedule();
+  renderPlayers();
+  switchTab('analysis');
+  runAnalysis();
+}
+
+function goToSetup() {
+  APP.currentScreen = 'setup';
+  renderScreen();
+}
+
+async function logout() {
+  try {
+    if (APP.sessionToken) {
+      await apiRequest('/api/auth/logout', { method: 'POST', body: JSON.stringify({}) });
+    }
+  } catch (_) {}
+  setSession('', null);
+  APP.selectedTeam = null;
+  APP.selectedGoal = null;
+  APP.currentScreen = 'auth';
+  renderTeamGrid();
+  renderScreen();
+  setAuthMode('login');
+  document.getElementById('authEmail').value = '';
+  document.getElementById('authPassword').value = '';
+  document.getElementById('authName').value = '';
+  document.getElementById('analysis-result').innerHTML = '';
+  renderStandings();
+  renderSchedule();
+  renderPlayers();
+}
+
+// Helpers
+function getTeam(c) { return APP.standings.find(s => s.code === c); }
+function clubOf(c) { return APP.clubs[c] || {abbr:c, name:c, logo:''}; }
+function displayTeamName(c) { return teamLabel(c); }
+function rankZone(r) { return r<=6 ? 'playoff' : r<=10 ? 'playin' : 'out'; }
+function zoneColor(z) { return z==='playoff' ? '#4CAF50' : z==='playin' ? '#2196F3' : '#f44336'; }
+
+async function loadLiveData() {
+  try {
+    const res = await fetch('/api/euroleague/live-data');
+    if (!res.ok) return;
+    const live = await res.json();
+    if (!live || !live.games || !live.teamStandingsTable) return;
+    APP.allGames = normalizeGames(live.games);
+    APP.officialStandingsTable = {...SNAPSHOT_STANDINGS_OVERRIDES, ...live.teamStandingsTable};
+    APP.officialStandingsStats = normalizeOfficialStandings(live.standingsStats, APP.officialStandingsTable);
+    APP.liveMeta = {
+      buildId: live.buildId || null,
+      currentRound: live.currentRound || null,
+      maxRound: live.maxRound || null,
+      allAvailableRounds: Array.isArray(live.allAvailableRounds) ? live.allAvailableRounds : [],
+      currentSeasonCode: live.currentSeasonCode || null,
+      source: live.source || 'live'
+    };
+  } catch (_) {
+    APP.officialStandingsStats = null;
+    APP.liveMeta = { source: 'snapshot' };
+  }
+}
+
+function mergeStandings(calculatedStandings, officialStandingsStats) {
+  if (!officialStandingsStats?.length) return calculatedStandings;
+  const calculatedByCode = Object.fromEntries(calculatedStandings.map(team => [team.code, team]));
+  return officialStandingsStats.map(team => ({
+    ...(calculatedByCode[team.code] || {}),
+    ...team,
+    h2h: calculatedByCode[team.code]?.h2h || {},
+    code: team.code
+  }));
+}
+
+function normalizeOfficialStandings(rows, standingsTable) {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const normalized = rows
+    .map(row => normalizeOfficialStandingRow(row, standingsTable))
+    .filter(Boolean)
+    .sort((a, b) => a.rank - b.rank);
+  return normalized.length ? normalized : null;
+}
+
+function normalizeOfficialStandingRow(row, standingsTable) {
+  const teamInfo = row?.Club ?? row?.club ?? row?.team ?? row?.Team ?? row?.clubInfo ?? {};
+  const code = String(
+    teamInfo?.TLA ??
+    teamInfo?.tla ??
+    teamInfo?.Code ??
+    teamInfo?.code ??
+    row?.TLA ??
+    row?.tla ??
+    row?.Code ??
+    row?.code ??
+    ''
+  ).toUpperCase();
+  if (!code) return null;
+
+  const rank = toNumber(
+    row?.Position ??
+    row?.position ??
+    row?.Rank ??
+    row?.rank ??
+    standingsTable?.[code]
+  );
+  const wins = toNumber(row?.W ?? row?.wins ?? row?.Wins);
+  const losses = toNumber(row?.L ?? row?.losses ?? row?.Losses);
+  const ptsFor = toNumber(row?.['Pts+'] ?? row?.PtsPlus ?? row?.ptsFor ?? row?.pointsFor);
+  const ptsAgainst = toNumber(row?.['Pts-'] ?? row?.PtsMinus ?? row?.ptsAgainst ?? row?.pointsAgainst);
+  const home = splitRecord(row?.H ?? row?.home ?? row?.Home);
+  const away = splitRecord(row?.A ?? row?.away ?? row?.Away);
+  const last10 = splitLast10(row?.L10 ?? row?.last10 ?? row?.Last10);
+
+  return {
+    code,
+    rank: Number.isFinite(rank) ? rank : standingsTable?.[code] || 99,
+    ...(Number.isFinite(wins) ? { w: wins } : {}),
+    ...(Number.isFinite(losses) ? { l: losses } : {}),
+    ...(Number.isFinite(ptsFor) ? { pts: ptsFor } : {}),
+    ...(Number.isFinite(ptsAgainst) ? { ptsA: ptsAgainst } : {}),
+    ...(home.w || home.l ? { homeW: home.w, homeL: home.l } : {}),
+    ...(away.w || away.l ? { awayW: away.w, awayL: away.l } : {}),
+    ...(last10.length ? { last10 } : {})
+  };
+}
+
+function splitRecord(value) {
+  const match = String(value ?? '').match(/(\d+)\s*-\s*(\d+)/);
+  return match ? { w: Number(match[1]), l: Number(match[2]) } : { w: 0, l: 0 };
+}
+
+function splitLast10(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return [];
+  if (/^[WL,\s-]+$/i.test(raw)) {
+    return raw
+      .split(/[\s,-]+/)
+      .filter(Boolean)
+      .map(item => item.toUpperCase().startsWith('W') ? 'W' : 'L')
+      .slice(-10);
+  }
+  const match = raw.match(/(\d+)\s*-\s*(\d+)/);
+  if (match) {
+    return [
+      ...Array.from({length: Number(match[1])}, () => 'W'),
+      ...Array.from({length: Number(match[2])}, () => 'L')
+    ].slice(-10);
+  }
+  return [];
+}
+
+function toNumber(value) {
+  const normalized = Number(String(value ?? '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function normalizeGames(games) {
+  return games.map(g => ({
+    gameCode: g.gameCode ?? g.id ?? g.code ?? null,
+    round: Number(g.round ?? g.roundNumber ?? 0),
+    date: g.date ?? g.startDate ?? g.datetime ?? null,
+    played: isPlayedGame(g),
+    home: {
+      code: g.home?.code ?? g.home?.clubCode ?? g.home?.tlaCode ?? g.homeTeam?.code ?? g.homeTeam?.tla ?? '',
+      score: Number(g.home?.score ?? g.homeScore ?? g.homePoints ?? 0)
+    },
+    away: {
+      code: g.away?.code ?? g.away?.clubCode ?? g.away?.tlaCode ?? g.awayTeam?.code ?? g.awayTeam?.tla ?? '',
+      score: Number(g.away?.score ?? g.awayScore ?? g.awayPoints ?? 0)
+    }
+  }));
+}
+
+function isPlayedGame(game) {
+  if (typeof game.played === 'boolean') return game.played;
+  const status = String(game.status || '').toLowerCase();
+  return status === 'result' || status === 'final';
+}
+
+// Standings calculation
+function calcStandings(games, standingsOverride) {
+  const teams = {};
+  const completedGames = games
+    .filter(g => g.played)
+    .slice()
+    .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+  function ensure(code) {
+    if (!teams[code]) teams[code] = {code,w:0,l:0,pts:0,ptsA:0,homeW:0,homeL:0,awayW:0,awayL:0,last10:[],h2h:{}};
+  }
+  for (const g of completedGames) {
+    const hc = g.home.code, ac = g.away.code;
+    if (!hc || !ac) continue;
+    const hp = g.home.score, ap = g.away.score;
+    ensure(hc); ensure(ac);
+    teams[hc].pts += hp; teams[hc].ptsA += ap;
+    teams[ac].pts += ap; teams[ac].ptsA += hp;
+    if (!teams[hc].h2h[ac]) teams[hc].h2h[ac] = {w:0,l:0,pf:0,pa:0};
+    if (!teams[ac].h2h[hc]) teams[ac].h2h[hc] = {w:0,l:0,pf:0,pa:0};
+    if (hp > ap) {
+      teams[hc].w++; teams[hc].homeW++; teams[hc].last10.push('W');
+      teams[ac].l++; teams[ac].awayL++; teams[ac].last10.push('L');
+      teams[hc].h2h[ac].w++; teams[hc].h2h[ac].pf+=hp; teams[hc].h2h[ac].pa+=ap;
+      teams[ac].h2h[hc].l++; teams[ac].h2h[hc].pf+=ap; teams[ac].h2h[hc].pa+=hp;
+    } else {
+      teams[ac].w++; teams[ac].awayW++; teams[ac].last10.push('W');
+      teams[hc].l++; teams[hc].homeL++; teams[hc].last10.push('L');
+      teams[ac].h2h[hc].w++; teams[ac].h2h[hc].pf+=ap; teams[ac].h2h[hc].pa+=hp;
+      teams[hc].h2h[ac].l++; teams[hc].h2h[ac].pf+=hp; teams[hc].h2h[ac].pa+=ap;
+    }
+  }
+  for (const t of Object.values(teams)) t.last10 = t.last10.slice(-10);
+  const arr = Object.values(teams);
+  const fallbackSort = (a,b) => {
+    if (b.w !== a.w) return b.w - a.w;
+    const ah = a.h2h[b.code]||{w:0,l:0,pf:0,pa:0}, bh = b.h2h[a.code]||{w:0,l:0,pf:0,pa:0};
+    if (ah.w !== bh.w) return ah.w > bh.w ? -1 : 1;
+    const ad = ah.pf-ah.pa, bd = bh.pf-bh.pa;
+    if (ad !== bd) return ad > bd ? -1 : 1;
+    return (b.pts-b.ptsA) - (a.pts-a.ptsA);
+  };
+  arr.sort((a,b) => {
+    const officialA = standingsOverride?.[a.code];
+    const officialB = standingsOverride?.[b.code];
+    const officialCount = Object.values(standingsOverride || {}).filter(Number.isInteger).length;
+    const useOfficialTable = officialCount >= Math.max(10, Math.floor(arr.length * 0.75));
+    if (useOfficialTable && Number.isInteger(officialA) && Number.isInteger(officialB) && officialA !== officialB) {
+      return officialA - officialB;
+    }
+    return fallbackSort(a, b);
+  });
+  const officialCount = Object.values(standingsOverride || {}).filter(Number.isInteger).length;
+  const useOfficialTable = officialCount >= Math.max(10, Math.floor(arr.length * 0.75));
+  return arr.map((t,i) => ({
+    ...t,
+    rank: useOfficialTable && Number.isInteger(standingsOverride?.[t.code]) ? standingsOverride[t.code] : i + 1
+  }));
+}
+
+// Team grid
+function renderTeamGrid() {
+  document.getElementById('teamGrid').innerHTML = APP.standings.map(t => {
+    const c = clubOf(t.code);
+    const sel = APP.selectedTeam === t.code ? ' selected' : '';
+    return `<div class="team-card${sel}" onclick="selectTeam('${t.code}',event)">
+      <img class="team-logo" src="${c.logo}" onerror="this.style.opacity='.2'" alt="${c.abbr}">
+      <div class="team-name">${teamLabel(t.code)}</div>
+      <div class="team-record">${t.w}-${t.l}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectTeam(code, e) {
+  APP.selectedTeam = code;
+  document.querySelectorAll('.team-card').forEach(c => c.classList.remove('selected'));
+  if (e && e.currentTarget) e.currentTarget.classList.add('selected');
+  updateHeaderStatus();
+  renderAnalysisSummary();
+}
+
+function selectGoal(g) {
+  APP.selectedGoal = g;
+  document.querySelectorAll('.goal-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelector('.goal-btn.'+g).classList.add('selected');
+  updateHeaderStatus();
+  renderAnalysisSummary();
+}
+
+// Analysis
+function pluralize(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function toTimestamp(value) {
+  const ts = new Date(value || 0).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function getRoundContext() {
+  const rounds = [...new Set(APP.allGames.map(g => g.round).filter(Number.isFinite))].sort((a,b)=>a-b);
+  const roundStats = rounds.map(round => {
+    const games = APP.allGames.filter(g => g.round === round);
+    const played = games.filter(g => g.played);
+    const unplayed = games.filter(g => !g.played);
+    const nextTip = unplayed
+      .map(g => toTimestamp(g.date))
+      .filter(Number.isFinite)
+      .sort((a,b)=>a-b)[0] ?? null;
+    return { round, games, playedCount: played.length, unplayedCount: unplayed.length, nextTip };
+  });
+
+  const activeRound = roundStats
+    .filter(r => r.playedCount > 0 && r.unplayedCount > 0)
+    .sort((a,b) => (a.nextTip ?? Number.MAX_SAFE_INTEGER) - (b.nextTip ?? Number.MAX_SAFE_INTEGER) || a.round - b.round)[0];
+  if (activeRound) {
+    const nextRound = roundStats.find(r => r.round > activeRound.round && r.unplayedCount > 0)?.round ?? null;
+    return { currentRound: activeRound.round, nextRound, rounds };
+  }
+
+  const upcomingRound = roundStats
+    .filter(r => r.unplayedCount > 0)
+    .sort((a,b) => (a.nextTip ?? Number.MAX_SAFE_INTEGER) - (b.nextTip ?? Number.MAX_SAFE_INTEGER) || a.round - b.round)[0];
+  if (upcomingRound) {
+    const nextRound = roundStats.find(r => r.round > upcomingRound.round && r.unplayedCount > 0)?.round ?? null;
+    return { currentRound: upcomingRound.round, nextRound, rounds };
+  }
+
+  return { currentRound: rounds[rounds.length - 1] || null, nextRound: null, rounds };
+}
+
+function getThreatScore(team, myTeam, goalRank, cutoffWins) {
+  if (!team || !myTeam) return -999;
+  if (team.code === myTeam.code) return 999;
+  const winsAhead = team.w - myTeam.w;
+  const winsFromCutoff = team.w - cutoffWins;
+  let score = 0;
+
+  if (team.rank <= goalRank) score += 12;
+  if (team.rank < myTeam.rank) score += 8;
+  if (winsAhead >= 0) score += Math.max(0, 5 - winsAhead);
+  if (team.rank > myTeam.rank) score += Math.max(0, 4 - (myTeam.w - team.w));
+  if (Math.abs(winsFromCutoff) <= 1) score += 5;
+  if (Math.abs(team.rank - goalRank) <= 1) score += 4;
+  if (Math.abs(team.rank - myTeam.rank) <= 2) score += 3;
+  if (team.rank > goalRank && myTeam.w - team.w >= 3) score -= 6;
+
+  return score;
+}
+
+function buildPressureReason(team, myTeam, goalRank) {
+  const club = displayTeamName(team.code);
+  const parts = [];
+  const winGap = team.w - myTeam.w;
+
+  parts.push(`${club} are #${team.rank}`);
+  if (team.rank <= goalRank && team.rank < myTeam.rank) {
+    parts.push(`they currently occupy a Top ${goalRank} spot`);
+  }
+  if (winGap > 0) {
+    parts.push(`${pluralize(winGap, 'win')} ahead of ${displayTeamName(myTeam.code)}`);
+  } else if (winGap === 0) {
+    parts.push(`level on wins with ${displayTeamName(myTeam.code)}`);
+  } else if (team.rank > myTeam.rank && Math.abs(winGap) <= 2) {
+    parts.push(`only ${pluralize(Math.abs(winGap), 'win')} behind ${displayTeamName(myTeam.code)}`);
+  }
+
+  return parts.join(', ');
+}
+
+function buildLowImpactReason(homeTeam, awayTeam, myTeam, goalRank) {
+  const homeGap = myTeam.w - homeTeam.w;
+  const awayGap = myTeam.w - awayTeam.w;
+  if (homeTeam.rank > goalRank && awayTeam.rank > goalRank && homeGap >= 3 && awayGap >= 3) {
+    return `${displayTeamName(homeTeam.code)} are ${pluralize(homeGap, 'win')} behind ${displayTeamName(myTeam.code)} and ${displayTeamName(awayTeam.code)} are ${pluralize(awayGap, 'win')} behind, so this game does not shift the race much right now.`;
+  }
+  return `Neither side is a direct blocker for ${displayTeamName(myTeam.code)} right now, so this result matters less than the games around the cutoff.`;
+}
+
+function analyzeGameForTeam(game, myTeam, goalRank, goalLabel) {
+  const tc = myTeam.code;
+  const myClub = clubOf(tc);
+  const hc = game.home.code, ac = game.away.code;
+  const homeTeam = getTeam(hc), awayTeam = getTeam(ac);
+  const isMyGame = hc === tc || ac === tc;
+  const cutoffTeam = APP.standings[goalRank - 1];
+  const cutoffWins = cutoffTeam ? cutoffTeam.w : myTeam.w;
+
+  if (isMyGame) {
+    const opp = hc === tc ? awayTeam : homeTeam;
+    const oppClub = displayTeamName(opp?.code || (hc === tc ? ac : hc));
+    const summary = `${displayTeamName(tc)} must beat ${oppClub}.`;
+    const details = `A win is the most direct way to close the gap to ${goalLabel} and prevents dropping further behind in the standings race.`;
+    const mv = myTeam.h2h[opp?.code] || {w:0,l:0,pf:0,pa:0};
+    const d = mv.pf - mv.pa;
+    const h2hNote = mv.w + mv.l > 0
+      ? `H2H vs ${oppClub}: ${mv.w}-${mv.l}${mv.w + mv.l > 1 ? `, ${d >= 0 ? '+' : ''}${d} points` : ''}.`
+      : '';
+    return {
+      sortScore: 999,
+      type: 'myteam',
+      badge: 'YOUR GAME',
+      summary,
+      details,
+      h2hNote,
+      effectIfGood: `${displayTeamName(tc)} would improve their position by taking care of their own game.`,
+      effectIfBad: `${displayTeamName(tc)} would miss a direct chance to gain ground in the standings.`
+    };
+  }
+
+  if (!homeTeam || !awayTeam) {
+    return {
+      sortScore: -999,
+      type: 'neutral',
+      badge: 'LOW IMPACT',
+      summary: `No strong result preference.`,
+      details: `This matchup does not directly affect ${displayTeamName(tc)} with the current data.`
+    };
+  }
+
+  const homeThreat = getThreatScore(homeTeam, myTeam, goalRank, cutoffWins);
+  const awayThreat = getThreatScore(awayTeam, myTeam, goalRank, cutoffWins);
+  let preferredWinner = homeThreat > awayThreat ? ac : hc;
+  if (homeThreat === awayThreat) {
+    preferredWinner = preferredWinnerForStandings(homeTeam, awayTeam, myTeam) || preferredWinner;
+  }
+
+  const threatenedTeam = preferredWinner === hc ? awayTeam : homeTeam;
+  const saferTeam = preferredWinner === hc ? homeTeam : awayTeam;
+  const topThreat = Math.max(homeThreat, awayThreat);
+  const threatGap = Math.abs(homeThreat - awayThreat);
+  const lowImpact = topThreat < 8 || (topThreat < 12 && threatGap <= 1);
+
+  if (lowImpact) {
+    return {
+      sortScore: topThreat,
+      type: 'neutral',
+      badge: 'LOW IMPACT',
+      summary: `${displayTeamName(preferredWinner)} winning is slightly better, but this is not a key swing game.`,
+      details: buildLowImpactReason(homeTeam, awayTeam, myTeam, goalRank),
+      effectIfGood: '',
+      effectIfBad: ''
+    };
+  }
+
+  const summary = `${displayTeamName(preferredWinner)} win is good for ${displayTeamName(tc)}.`;
+  const details = `${buildPressureReason(threatenedTeam, myTeam, goalRank)}, so ${displayTeamName(threatenedTeam.code)} losing helps ${displayTeamName(tc)}'s path to ${goalLabel}.`;
+  const mv = myTeam.h2h[threatenedTeam.code] || {w:0,l:0,pf:0,pa:0};
+  const d = mv.pf - mv.pa;
+  const h2hNote = mv.w + mv.l > 0
+    ? `H2H vs ${displayTeamName(threatenedTeam.code)}: ${mv.w}-${mv.l}, ${d >= 0 ? '+' : ''}${d} points.`
+    : '';
+
+  return {
+    sortScore: topThreat + threatGap,
+    type: topThreat >= 18 ? 'good' : 'watch',
+    badge: topThreat >= 18 ? 'IMPORTANT' : 'WATCH',
+    summary,
+    details,
+    h2hNote,
+    threatenedCode: threatenedTeam.code,
+    preferredWinnerCode: preferredWinner,
+    effectIfGood: `If ${displayTeamName(threatenedTeam.code)} lose, ${displayTeamName(tc)} get a cleaner path toward ${goalLabel} because one of the teams ahead or around the cutoff drops a game.`,
+    effectIfBad: `If ${displayTeamName(threatenedTeam.code)} win, they stay stronger in the race and ${displayTeamName(tc)} will likely need extra wins later to pass them.`
+  };
+}
+
+function preferredWinnerForStandings(homeTeam, awayTeam, myTeam) {
+  const homeAbove = homeTeam.rank < myTeam.rank;
+  const awayAbove = awayTeam.rank < myTeam.rank;
+  const homeBelow = homeTeam.rank > myTeam.rank;
+  const awayBelow = awayTeam.rank > myTeam.rank;
+
+  if (homeAbove && !awayAbove) return awayTeam.code;
+  if (awayAbove && !homeAbove) return homeTeam.code;
+  if (homeBelow && !awayBelow) return awayTeam.code;
+  if (awayBelow && !homeBelow) return homeTeam.code;
+
+  if (homeAbove && awayAbove) {
+    return homeTeam.rank < awayTeam.rank ? awayTeam.code : homeTeam.code;
+  }
+  if (homeBelow && awayBelow) {
+    return homeTeam.rank > awayTeam.rank ? homeTeam.code : awayTeam.code;
+  }
+  return null;
+}
+
+function buildRoundSummary(items, myTeam) {
+  const relevant = items
+    .filter(item => item && (item.type === 'good' || item.type === 'watch'))
+    .sort((a,b) => (b?.sortScore ?? -999) - (a?.sortScore ?? -999))
+    .slice(0, 4);
+
+  if (!relevant.length) {
+    return `Short summary: there are no major swing results this round for ${displayTeamName(myTeam.code)}. The main priority is simply winning their own game.`;
+  }
+
+  const goodOutcomes = relevant
+    .map(item => item.effectIfGood)
+    .filter(Boolean)
+    .join(' ');
+  const badOutcomes = relevant
+    .map(item => item.effectIfBad)
+    .filter(Boolean)
+    .join(' ');
+
+  return `If the important teams lose: ${goodOutcomes} If they win: ${badOutcomes}`;
+}
+
+function buildSeasonVerdict(myTeam, goalRank, gamesLeft) {
+  const cutoffTeam = APP.standings[goalRank - 1];
+  const cutoffWins = cutoffTeam ? cutoffTeam.w : myTeam.w;
+  const winsBehind = Math.max(0, cutoffWins - myTeam.w);
+  const spotsBehind = Math.max(0, myTeam.rank - goalRank);
+
+  if (spotsBehind === 0) {
+    return {
+      title: 'Inside the Line',
+      icon: '✅',
+      summary: `${displayTeamName(myTeam.code)} are currently in position for the cutoff at #${myTeam.rank}. With ${gamesLeft} ${gamesLeft === 1 ? 'game' : 'games'} left, the priority is holding the spot.`
+    };
+  }
+
+  if (winsBehind > gamesLeft) {
+    return {
+      title: 'Almost Out',
+      icon: '⚠️',
+      summary: `${displayTeamName(myTeam.code)} are at position ${myTeam.rank}, ${spotsBehind} spot(s) behind the cutoff. With ${gamesLeft} ${gamesLeft === 1 ? 'game' : 'games'} left, they need outside help and a near-perfect finish.`
+    };
+  }
+
+  return {
+    title: 'Still Alive!',
+    icon: '⚡',
+    summary: `${displayTeamName(myTeam.code)} is at position ${myTeam.rank}, ${spotsBehind} spot(s) behind the cutoff. With ${gamesLeft} ${gamesLeft === 1 ? 'game' : 'games'} left, it's mathematically possible but needs help.`
+  };
+}
+
+function runAnalysis() {
+  if (!APP.selectedTeam) { alert('Select your team!'); return; }
+  if (!APP.selectedGoal) { alert('Select your goal!'); return; }
+  const tc = APP.selectedTeam, goal = APP.selectedGoal;
+  const goalRank = goal === 'playoffs' ? 6 : 10;
+  const goalLabel = goal === 'playoffs' ? 'Playoffs (Top 6)' : 'Play-In (Top 10)';
+  const myTeam = getTeam(tc); if (!myTeam) return;
+  const myClub = clubOf(tc);
+  const myGames = APP.allGames.filter(g => g.home.code===tc || g.away.code===tc);
+  const { currentRound } = getRoundContext();
+  const result = document.getElementById('analysis-result');
+  if (!myGames.find(g => !g.played)) {
+    const msg = myTeam.rank<=6 ? 'Made Playoffs!' : myTeam.rank<=10 ? 'Made Play-In!' : 'Did not qualify';
+    result.innerHTML = `<div class="no-selection">Season complete! Final rank: <strong style="color:#f7b731">#${myTeam.rank}</strong><br>${msg}</div>`;
+    return;
+  }
+  const rank = myTeam.rank, zone = rankZone(rank), gamesLeft = myGames.filter(g=>!g.played).length;
+  const atCutoff = APP.standings[goalRank-1];
+  const wDiff = myTeam.w - (atCutoff ? atCutoff.w : 0);
+  const diffLabel = wDiff>0 ? `<span style="color:#4CAF50">+${wDiff} ahead</span>` :
+                   wDiff<0 ? `<span style="color:#f44336">${wDiff} behind</span>` :
+                   `<span style="color:#f7b731">tied</span>`;
+  let barHtml = '';
+  for (let i=1; i<=20; i++) {
+    const z = i<=6 ? 'zone-playoff' : i<=10 ? 'zone-playin' : 'zone-out';
+    barHtml += `<div class="pos-zone ${z}${i===rank?' zone-current':''}" title="#${i}">${i}</div>`;
+  }
+  const roundGames = APP.allGames
+    .filter(g => g.round === currentRound)
+    .sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  const analyzedGames = roundGames
+    .map(g => {
+      const hClub = clubOf(g.home.code), aClub = clubOf(g.away.code);
+      const analysis = analyzeGameForTeam(g, myTeam, goalRank, goalLabel);
+      const ds = g.date ? new Date(g.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '';
+      const ts = g.date ? new Date(g.date).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '';
+      return {
+        type: analysis.type,
+        summary: analysis.summary,
+        sortScore: analysis.sortScore,
+        effectIfGood: analysis.effectIfGood,
+        effectIfBad: analysis.effectIfBad,
+        html: `<div class="game-card ${analysis.type}">
+          <div class="game-teams">
+            <span>${displayTeamName(g.home.code)}</span><span class="vs-label">vs</span><span>${displayTeamName(g.away.code)}</span>
+            <span style="font-size:.6rem;color:#8892b0;margin-left:auto">${ds}${ts?' '+ts:''}</span>
+          </div>
+          <div class="game-verdict"><span class="verdict-badge badge-${analysis.type}">${analysis.badge}</span> ${analysis.summary}</div>
+          <div class="h2h-note">${analysis.details}</div>
+          ${analysis.h2hNote?'<div class="h2h-note">'+analysis.h2hNote+'</div>':''}
+        </div>`
+      };
+    });
+  const sortedGames = analyzedGames.sort((a,b)=>b.sortScore-a.sortScore);
+  const cards = sortedGames.map(card => card.html).join('');
+  const roundSummary = buildRoundSummary(sortedGames, myTeam);
+  const seasonVerdict = buildSeasonVerdict(myTeam, goalRank, gamesLeft);
+  const verdictSection = `<div class="verdict-card"><div class="verdict-label">📋 VERDICT</div><div class="verdict-headline">${seasonVerdict.icon} ${seasonVerdict.title}</div><div class="verdict-copy">${seasonVerdict.summary}</div></div>`;
+  const roundSection = `<div class="section-title" style="margin-top:16px">Current Round ${currentRound}</div><div class="games-list">${cards}</div><div class="position-card" style="margin-top:12px"><div class="section-title" style="margin:0 0 8px 0">Short Summary</div><div class="h2h-note" style="font-size:.78rem;line-height:1.5">${roundSummary}</div></div>`;
+  result.innerHTML = `
+    <div class="position-card">
+      <div class="pos-row">
+        <div class="pos-bubble" style="background:${zoneColor(zone)}22;border:2px solid ${zoneColor(zone)};color:${zoneColor(zone)}">#${rank}</div>
+        <div class="pos-info">
+          <h3>${myClub.name}</h3>
+          <p>${myTeam.w}W - ${myTeam.l}L | ${gamesLeft} games left</p>
+          <p style="margin-top:3px">Goal: ${goalLabel} | ${diffLabel}</p>
+        </div>
+      </div>
+      <div class="pos-bar">${barHtml}</div>
+      <div class="pos-legend">
+        <span class="pos-legend-item pos-legend-playoff">🥇 Top 6 = Playoffs</span>
+        <span class="pos-legend-item pos-legend-playin">🥈 7-10 = Play-In</span>
+        <span class="pos-legend-item pos-legend-out">❌ 11-20 = Out</span>
+      </div>
+    </div>
+    ${verdictSection}
+    ${roundSection}`;
+}
+
+// Standings tab
+function renderStandings() {
+  const rows = APP.standings.map(t => {
+    const c=clubOf(t.code), z=rankZone(t.rank), zc=zoneColor(z);
+    const cls=t.code===APP.selectedTeam?' my-team':'';
+    const bCls=t.rank===6?' zone-border-playoff':t.rank===10?' zone-border-playin':'';
+    const diff=t.pts-t.ptsA;
+    const dH=diff>0?`<span class="diff-pos">+${diff}</span>`:diff<0?`<span class="diff-neg">${diff}</span>`:'0';
+    const dots=t.last10.map(r=>`<div class="dot dot-${r==='W'?'w':'l'}" title="${r==='W'?'Win':'Loss'}"></div>`).join('');
+    return `<tr class="${cls}${bCls}">
+      <td><span class="pos-num ${z}" style="color:${zc}">${t.rank}</span></td>
+      <td><div class="team-cell"><img src="${c.logo}" onerror="this.style.display='none'" width="18" height="18"><span>${c.abbr}</span></div></td>
+      <td style="font-weight:700">${t.w}</td><td>${t.l}</td>
+      <td>${t.homeW}-${t.homeL}</td><td>${t.awayW}-${t.awayL}</td>
+      <td>${dH}</td><td><div class="l10-dots">${dots}</div></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('standings-content').innerHTML=`
+    <div style="font-size:.6rem;color:#8892b0;margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap">
+      <span><span style="color:#4CAF50">■</span> Playoffs (1-6)</span>
+      <span><span style="color:#2196F3">■</span> Play-In (7-10)</span>
+      <span><span style="color:#f44336">■</span> Eliminated (11+)</span>
+      <span><span style="color:#51c878">●</span> L10 Wins</span>
+      <span><span style="color:#d36b79">●</span> L10 Losses</span>
+    </div>
+    <div class="standings-wrap"><table class="standings-table">
+      <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>Home</th><th>Away</th><th>+/-</th><th>L10</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+// Schedule tab
+function renderSchedule() {
+  const { currentRound: curRound } = getRoundContext();
+  const allRounds = [...new Set(APP.allGames.map(g => g.round).filter(Boolean))].sort((a,b)=>a-b);
+  const feedRounds = (APP.liveMeta?.allAvailableRounds || [])
+    .map(r => Number(r?.round ?? r))
+    .filter(Number.isFinite)
+    .sort((a,b) => a-b);
+  const rounds = feedRounds.length ? [...new Set(feedRounds)] : allRounds;
+  const showRounds = rounds.filter(r => r >= curRound - 3 && r <= curRound + 3);
+  const myCode=APP.selectedTeam;
+  let html='';
+  for (const round of showRounds) {
+    const games=APP.allGames
+      .filter(g => g.round === round)
+      .sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+    const isCurrent=round===curRound;
+    html+=`<div class="round-group"><div class="round-label${isCurrent?' next-round':''}">${isCurrent?'> ':''}Round ${round}${isCurrent?' - CURRENT':''}</div>`;
+    for (const g of games) {
+      const hc=g.home.code, ac=g.away.code;
+      const hCl=clubOf(hc), aCl=clubOf(ac);
+      const isMyGame=hc===myCode||ac===myCode;
+      const hp=g.home.score, ap=g.away.score;
+      const hWon=g.played&&hp>ap, aWon=g.played&&ap>hp;
+      const ts=g.date?new Date(g.date).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'';
+      const ds=g.date?new Date(g.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
+      html+=`<div class="game-row${isMyGame?' my-game':''}">
+        <div class="gr-teams">
+          <div class="gr-team${hWon?' winner':''}"><img src="${hCl.logo}" onerror="this.style.display='none'" width="16" height="16">${hCl.abbr}</div>
+          <div class="gr-team${aWon?' winner':''}"><img src="${aCl.logo}" onerror="this.style.display='none'" width="16" height="16">${aCl.abbr}</div>
+        </div>
+        ${g.played?`<div class="gr-scores"><div class="gr-score${hWon?' winner':''}">${hp}</div><div class="gr-score${aWon?' winner':''}">${ap}</div></div>`:''}
+        <div class="gr-time">${g.played?'FINAL':ts||ds}</div>
+      </div>`;
+    }
+    html+='</div>';
+  }
+  document.getElementById('schedule-content').innerHTML=html;
+}
+
+// Players tab
+function renderPlayers() {
+  const el=document.getElementById('players-content');
+  const myCode=APP.selectedTeam;
+  let rosterHtml='';
+  if (myCode) {
+    const myPlayers=Object.entries(APP.seasonStats)
+      .filter(([code])=>APP.playerMeta[code]&&APP.playerMeta[code].team===myCode)
+      .sort(([,a],[,b])=>(b.gp?b.pts/b.gp:0)-(a.gp?a.pts/a.gp:0));
+    if (!myPlayers.length) {
+      rosterHtml=`<div class="error-msg">No player data for ${clubOf(myCode).name}</div>`;
+    } else {
+      const cards=myPlayers.slice(0,15).map(([code,s])=>{
+        const gp=s.gp||1, m=APP.playerMeta[code]||{};
+        const ppg=(s.pts/gp).toFixed(1),rpg=(s.reb/gp).toFixed(1),apg=(s.ast/gp).toFixed(1),bpg=(s.blk/gp).toFixed(1);
+        return `<div class="player-card">
+          <img class="player-img" src="${m.photo||''}" onerror="this.src=''" alt="${m.name||code}">
+          <div class="player-info">
+            <div class="player-name">${m.name||code}</div>
+            <div class="player-pos">${m.pos||''} - ${gp} GP</div>
+            <div class="player-stats">
+              <div class="pstat"><span class="pstat-val">${ppg}</span><span class="pstat-lbl">PTS</span></div>
+              <div class="pstat"><span class="pstat-val">${rpg}</span><span class="pstat-lbl">REB</span></div>
+              <div class="pstat"><span class="pstat-val">${apg}</span><span class="pstat-lbl">AST</span></div>
+              <div class="pstat"><span class="pstat-val">${bpg}</span><span class="pstat-lbl">BLK</span></div>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      rosterHtml=`<div class="section-title">${clubOf(myCode).name} - 2025-26</div><div class="player-list">${cards}</div>`;
+    }
+  } else {
+    rosterHtml='<div class="no-selection">Select a team in the Analysis tab to see their roster</div>';
+  }
+  const cats=[{key:'pts',label:'Points'},{key:'reb',label:'Rebounds'},{key:'ast',label:'Assists'},{key:'blk',label:'Blocks'},{key:'stl',label:'Steals'},{key:'pir',label:'PIR'}];
+  let leadersHtml='<div class="section-title" style="margin-top:8px">EuroLeague Leaders 2025-26</div><div class="leaders-grid">';
+  for (const cat of cats) {
+    const sorted=Object.entries(APP.seasonStats)
+      .filter(([,s])=>s.gp>=15)
+      .map(([code,s])=>({code,avg:s[cat.key]/s.gp}))
+      .sort((a,b)=>b.avg-a.avg).slice(0,5);
+    const rows=sorted.map(({code,avg},i)=>{
+      const m=APP.playerMeta[code]||{};
+      const parts=(m.name||code).split(' ');
+      const sn=parts.length>1?parts[0][0]+'. '+parts.slice(1).join(' '):(m.name||code);
+      return `<div class="leader-row">
+        <div class="leader-medal">${MEDALS[i]}</div>
+        <img class="leader-img" src="${m.photo||''}" onerror="this.src=''" alt="${sn}">
+        <div class="leader-info"><div class="leader-name">${sn}</div><div class="leader-team">${clubOf(m.team||'').abbr}</div></div>
+        <div class="leader-val">${avg.toFixed(1)}</div>
+      </div>`;
+    }).join('');
+    leadersHtml+=`<div class="leader-card"><div class="leader-cat">${cat.label}</div>${rows}</div>`;
+  }
+  leadersHtml+='</div>';
+  el.innerHTML=rosterHtml+leadersHtml;
+}
+
+const TEAM_DISPLAY_NAMES = {
+  BAR: 'Barcelona',
+  BAS: 'Baskonia',
+  DUB: 'Dubai',
+  HTA: 'Hapoel',
+  MAD: 'Real',
+  MCO: 'Monaco',
+  MIL: 'Milan',
+  MUN: 'Bayern',
+  OLY: 'Olympiacos',
+  PAN: 'Panathinaikos',
+  PAM: 'Valencia',
+  PAR: 'Paris',
+  PRS: 'Partizan',
+  RED: 'Red Star',
+  TEL: 'Maccabi',
+  ULK: 'Fenerbahce',
+  VIR: 'Virtus',
+  ZAL: 'Zalgiris'
+};
+
+const TEAM_MAP_FALLBACK = {
+  '006835': 'TEL',
+  '007990': 'TEL',
+  '010781': 'TEL',
+  '011193': 'TEL',
+  '012336': 'TEL',
+  '013289': 'TEL',
+  '013304': 'TEL',
+  '013381': 'TEL',
+  '013403': 'TEL',
+  '013699': 'TEL',
+  '014012': 'TEL',
+  '014120': 'TEL',
+  '014123': 'TEL',
+  '014127': 'TEL'
+};
+
+async function patchPlayerTeams() {
+  try {
+    const resp = await fetch('https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E/seasons/E2025/people?personType=J&Limit=500&Offset=0&active=true&sortBy=name');
+    if (resp.ok) {
+      const data = await resp.json();
+      (data.data || []).forEach(p => {
+        const code = p.person?.code;
+        const club = p.club?.code;
+        if (code && club && APP.playerMeta[code]) APP.playerMeta[code].team = club;
+      });
+      return;
+    }
+  } catch (_) {}
+
+  for (const [code, team] of Object.entries(TEAM_MAP_FALLBACK)) {
+    if (APP.playerMeta[code]) APP.playerMeta[code].team = team;
+  }
+}
+
+function teamLabel(code) {
+  return TEAM_DISPLAY_NAMES[code] || clubOf(code).name || code;
+}
+
+// Start
+init();
