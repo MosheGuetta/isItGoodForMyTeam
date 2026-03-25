@@ -22,9 +22,21 @@
         "goal": "playin"
       },
       "createdAt": "2026-03-25T18:37:15.186Z",
+      "session": null
+    },
+    {
+      "id": "28cd8320-33e0-46e9-ba5b-cedc88cb64c6",
+      "name": "Veronica",
+      "email": "veronicacohenb@gmail.com",
+      "passwordHash": "bfb72ea2aa1f935592bdc0de06e1eb59:91dbe5f0fa75686a20ab5d5967179159401af2bdf6639013ba64f827c37aa7e9039aed883176e55b61c6f61aa6e2ce9a8dcc44a6bf3f2f5f640817580b447953",
+      "preferences": {
+        "team": "TEL",
+        "goal": "playin"
+      },
+      "createdAt": "2026-03-25T19:45:12.813Z",
       "session": {
-        "token": "a257643611bf39114bf79762737ab9cc03b86544fe50f26e",
-        "expiresAt": 1777056199202
+        "token": "3895d0ee2e671b180f69bd0af165fb0da20d73c0b69198cb",
+        "expiresAt": 1777059912813
       }
     }
   ]
