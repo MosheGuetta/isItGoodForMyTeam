@@ -304,6 +304,10 @@ async function logout() {
 function getTeam(c) { return APP.standings.find(s => s.code === c); }
 function clubOf(c) { return APP.clubs[c] || {abbr:c, name:c, logo:''}; }
 function displayTeamName(c) { return teamLabel(c); }
+function formatTeamRecord(code) {
+  const team = getTeam(code);
+  return team ? `(${team.w}-${team.l})` : '';
+}
 function rankZone(r) { return r<=6 ? 'playoff' : r<=10 ? 'playin' : 'out'; }
 function zoneColor(z) { return z==='playoff' ? '#4CAF50' : z==='playin' ? '#2196F3' : '#f44336'; }
 function winnerCodeForGame(game) {
@@ -729,35 +733,50 @@ function toTimestamp(value) {
 }
 
 function getRoundContext() {
+  const now = Date.now();
+  const LIVE_ROUND_WINDOW_MS = 12 * 60 * 60 * 1000;
+  const todayStart = new Date().setHours(0, 0, 0, 0);
   const rounds = [...new Set(APP.allGames.map(g => g.round).filter(Number.isFinite))].sort((a,b)=>a-b);
   const roundStats = rounds.map(round => {
     const games = APP.allGames.filter(g => g.round === round);
     const played = games.filter(g => g.played);
     const unplayed = games.filter(g => !g.played);
-    const nextTip = unplayed
+    const unplayedTips = unplayed
       .map(g => toTimestamp(g.date))
       .filter(Number.isFinite)
-      .sort((a,b)=>a-b)[0] ?? null;
-    return { round, games, playedCount: played.length, unplayedCount: unplayed.length, nextTip };
+      .sort((a,b)=>a-b);
+    const nextTip = unplayedTips[0] ?? null;
+    const hasLiveOrTodayTip = unplayedTips.some(ts => (
+      ts >= now - LIVE_ROUND_WINDOW_MS && ts <= now
+    ) || new Date(ts).setHours(0, 0, 0, 0) === todayStart);
+    return { round, games, playedCount: played.length, unplayedCount: unplayed.length, nextTip, hasLiveOrTodayTip };
   });
+  const latestStartedRound = roundStats
+    .filter(r => r.playedCount > 0)
+    .map(r => r.round)
+    .sort((a,b)=>b-a)[0] ?? null;
+  const mainlineRounds = latestStartedRound === null
+    ? roundStats
+    : roundStats.filter(r => r.round >= latestStartedRound);
 
-  const activeRound = roundStats
-    .filter(r => r.playedCount > 0 && r.unplayedCount > 0)
-    .sort((a,b) => (a.nextTip ?? Number.MAX_SAFE_INTEGER) - (b.nextTip ?? Number.MAX_SAFE_INTEGER) || a.round - b.round)[0];
+  const activeRound = mainlineRounds
+    .filter(r => r.unplayedCount > 0 && r.hasLiveOrTodayTip)
+    .sort((a,b) => a.round - b.round || (a.nextTip ?? Number.MAX_SAFE_INTEGER) - (b.nextTip ?? Number.MAX_SAFE_INTEGER))[0];
   if (activeRound) {
     const nextRound = roundStats.find(r => r.round > activeRound.round && r.unplayedCount > 0)?.round ?? null;
-    return { currentRound: activeRound.round, nextRound, rounds };
+    return { currentRound: activeRound.round, focusRound: activeRound.round, nextRound, roundState: 'current', rounds };
   }
 
-  const upcomingRound = roundStats
-    .filter(r => r.unplayedCount > 0)
-    .sort((a,b) => (a.nextTip ?? Number.MAX_SAFE_INTEGER) - (b.nextTip ?? Number.MAX_SAFE_INTEGER) || a.round - b.round)[0];
+  const upcomingRound = latestStartedRound === null
+    ? roundStats.find(r => r.unplayedCount > 0) ?? null
+    : roundStats.find(r => r.round > latestStartedRound && r.unplayedCount > 0) ?? null;
   if (upcomingRound) {
     const nextRound = roundStats.find(r => r.round > upcomingRound.round && r.unplayedCount > 0)?.round ?? null;
-    return { currentRound: upcomingRound.round, nextRound, rounds };
+    return { currentRound: upcomingRound.round, focusRound: upcomingRound.round, nextRound, roundState: 'next', rounds };
   }
 
-  return { currentRound: rounds[rounds.length - 1] || null, nextRound: null, rounds };
+  const fallbackRound = rounds[rounds.length - 1] || null;
+  return { currentRound: fallbackRound, focusRound: fallbackRound, nextRound: null, roundState: 'current', rounds };
 }
 
 function getThreatScore(team, myTeam, goalRank, cutoffWins) {
@@ -954,7 +973,7 @@ function runAnalysis() {
   const myTeam = getTeam(tc); if (!myTeam) return;
   const myClub = clubOf(tc);
   const myGames = APP.allGames.filter(g => g.home.code===tc || g.away.code===tc);
-  const { currentRound } = getRoundContext();
+  const { focusRound, roundState } = getRoundContext();
   const result = document.getElementById('analysis-result');
   if (!myGames.find(g => !g.played)) {
     const msg = myTeam.rank<=6 ? 'Made Playoffs!' : myTeam.rank<=10 ? 'Made Play-In!' : 'Did not qualify';
@@ -973,7 +992,7 @@ function runAnalysis() {
     barHtml += `<div class="pos-zone ${z}${i===rank?' zone-current':''}" title="#${i}">${i}</div>`;
   }
   const roundGames = APP.allGames
-    .filter(g => g.round === currentRound)
+    .filter(g => g.round === focusRound)
     .sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   const analyzedGames = roundGames
     .map(g => {
@@ -983,6 +1002,8 @@ function runAnalysis() {
       const resultImpact = !g.played || !winner || !preferredWinnerCode
         ? null
         : winner === preferredWinnerCode ? 'good' : 'bad';
+      const homeClub = clubOf(g.home.code);
+      const awayClub = clubOf(g.away.code);
       const ds = g.date ? new Date(g.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '';
       const ts = g.date ? new Date(g.date).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '';
       return {
@@ -994,9 +1015,25 @@ function runAnalysis() {
         threatenedCode: analysis.threatenedCode || null,
         resultImpact,
         html: `<div class="game-card ${analysis.type}">
+          <div class="game-card-head">
+            <span class="game-date">${ds}${ts ? ` ${ts}` : ''}</span>
+          </div>
           <div class="game-teams">
-            <span>${displayTeamName(g.home.code)}</span><span class="vs-label">vs</span><span>${displayTeamName(g.away.code)}</span>
-            <span style="font-size:.6rem;color:#8892b0;margin-left:auto">${ds}${ts?' '+ts:''}</span>
+            <div class="matchup-team">
+              ${renderLogoMarkup(homeClub, 'sm')}
+              <div class="matchup-team-copy">
+                <span class="matchup-team-name">${homeClub.abbr}</span>
+                <span class="matchup-team-record">${formatTeamRecord(g.home.code)}</span>
+              </div>
+            </div>
+            <span class="vs-label">vs</span>
+            <div class="matchup-team matchup-team-away">
+              ${renderLogoMarkup(awayClub, 'sm')}
+              <div class="matchup-team-copy">
+                <span class="matchup-team-name">${awayClub.abbr}</span>
+                <span class="matchup-team-record">${formatTeamRecord(g.away.code)}</span>
+              </div>
+            </div>
           </div>
           <div class="game-verdict"><span class="verdict-badge badge-${analysis.type}">${analysis.badge}</span> ${analysis.summary}</div>
           <div class="h2h-note">${analysis.details}</div>
@@ -1010,7 +1047,8 @@ function runAnalysis() {
   const resultAlert = buildResultNotification(sortedGames, myTeam, goalLabel);
   const seasonVerdict = buildSeasonVerdict(myTeam, goalRank, gamesLeft);
   const verdictSection = `<div class="verdict-card"><div class="verdict-label">📋 VERDICT</div><div class="verdict-headline">${seasonVerdict.icon} ${seasonVerdict.title}</div><div class="verdict-copy">${seasonVerdict.summary}</div></div>`;
-  const roundSection = `<div class="section-title" style="margin-top:16px">Current Round ${currentRound}</div><div class="games-list">${cards}</div><div class="position-card summary-card" style="margin-top:12px"><div class="section-title" style="margin:0 0 8px 0">Short Summary</div><div class="summary-lede">${roundSummary.intro}</div><div class="summary-grid"><div class="summary-column good-summary"><div class="summary-heading">If the important teams lose</div><ul class="summary-list">${roundSummary.goodBullets.map(item => `<li>${item}</li>`).join('')}</ul></div><div class="summary-column bad-summary"><div class="summary-heading">If the important teams win</div><ul class="summary-list">${roundSummary.badBullets.map(item => `<li>${item}</li>`).join('')}</ul></div></div></div>`;
+  const roundHeading = `${roundState === 'next' ? 'Next' : 'Current'} Round ${focusRound}`;
+  const roundSection = `<div class="section-title" style="margin-top:16px">${roundHeading}</div><div class="games-list">${cards}</div><div class="position-card summary-card" style="margin-top:12px"><div class="section-title" style="margin:0 0 8px 0">Short Summary</div><div class="summary-lede">${roundSummary.intro}</div><div class="summary-grid"><div class="summary-column good-summary"><div class="summary-heading">If the important teams lose</div><ul class="summary-list">${roundSummary.goodBullets.map(item => `<li>${item}</li>`).join('')}</ul></div><div class="summary-column bad-summary"><div class="summary-heading">If the important teams win</div><ul class="summary-list">${roundSummary.badBullets.map(item => `<li>${item}</li>`).join('')}</ul></div></div></div>`;
   result.innerHTML = `
     <div class="position-card">
       <div class="pos-row">
@@ -1066,22 +1104,23 @@ function renderStandings() {
 
 // Schedule tab
 function renderSchedule() {
-  const { currentRound: curRound } = getRoundContext();
+  const { focusRound, roundState } = getRoundContext();
   const allRounds = [...new Set(APP.allGames.map(g => g.round).filter(Boolean))].sort((a,b)=>a-b);
   const feedRounds = (APP.liveMeta?.allAvailableRounds || [])
     .map(r => Number(r?.round ?? r))
     .filter(Number.isFinite)
     .sort((a,b) => a-b);
   const rounds = feedRounds.length ? [...new Set(feedRounds)] : allRounds;
-  const showRounds = rounds.filter(r => r >= curRound - 3 && r <= curRound + 3);
+  const showRounds = rounds.filter(r => r >= focusRound - 3 && r <= focusRound + 3);
   const myCode=APP.selectedTeam;
   let html='';
   for (const round of showRounds) {
     const games=APP.allGames
       .filter(g => g.round === round)
       .sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-    const isCurrent=round===curRound;
-    html+=`<div class="round-group"><div class="round-label${isCurrent?' next-round':''}">${isCurrent?'> ':''}Round ${round}${isCurrent?' - CURRENT':''}</div>`;
+    const isFocusRound = round===focusRound;
+    const roundSuffix = !isFocusRound ? '' : roundState === 'next' ? ' - NEXT' : ' - CURRENT';
+    html+=`<div class="round-group"><div class="round-label${isFocusRound?' next-round':''}">${isFocusRound?'> ':''}Round ${round}${roundSuffix}</div>`;
     for (const g of games) {
       const hc=g.home.code, ac=g.away.code;
       const hCl=clubOf(hc), aCl=clubOf(ac);
