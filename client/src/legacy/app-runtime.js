@@ -44,6 +44,8 @@ const APP = {
   authBusy: false
 };
 
+let hasInitialized = false;
+
 // Init
 async function init() {
   await patchPlayerTeams();
@@ -1221,5 +1223,19 @@ function teamLabel(code) {
   return TEAM_DISPLAY_NAMES[code] || clubOf(code).name || code;
 }
 
-// Start
-init();
+window.switchTab = switchTab;
+window.setAuthMode = setAuthMode;
+window.submitAuth = submitAuth;
+window.completeSetup = completeSetup;
+window.goToSetup = goToSetup;
+window.logout = logout;
+window.selectTeam = selectTeam;
+window.selectGoal = selectGoal;
+window.runAnalysis = runAnalysis;
+window.closeResultAlert = closeResultAlert;
+
+export function initLegacyApp() {
+  if (hasInitialized) return;
+  hasInitialized = true;
+  init();
+}
