@@ -177,6 +177,12 @@ export default function App() {
             >
               ⚡ Live
             </button>
+            <button
+              className="tab-btn"
+              onClick={() => window.switchTab?.('scenarios')}
+            >
+              Scenarios
+            </button>
           </div>
           <div id="tab-analysis" className="tab-content active">
             <div className="analysis-toolbar">
@@ -216,6 +222,9 @@ export default function App() {
           </div>
           <div id="tab-live" className="tab-content">
             <div id="live-results-content" />
+          </div>
+          <div id="tab-scenarios" className="tab-content">
+            <div id="scenarios-content" />
           </div>
         </section>
       </main>

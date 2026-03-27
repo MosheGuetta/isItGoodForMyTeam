@@ -6,6 +6,7 @@ const META_DATA  = window.__META__;
 const MEDALS = ['1.','2.','3.','4.','5.'];
 const LIVE_POLL_INTERVAL_MS = 3 * 60 * 1000;
 const LIVE_POLL_INTERVAL_LIVE_MS = 30 * 1000;
+const TAB_NAMES = ['analysis', 'standings', 'schedule', 'players', 'live', 'scenarios'];
 // Keep the bundled snapshot aligned with the known official order when live data is unavailable.
 const SNAPSHOT_STANDINGS_OVERRIDES = {
   ULK: 1,
@@ -75,19 +76,21 @@ async function init() {
   renderSchedule();
   renderPlayers();
   renderLiveResults();
+  renderScenarios();
   startLivePolling();
 }
 
 // Tabs
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b,i) =>
-    b.classList.toggle('active', ['analysis','standings','schedule','players','live'][i] === name));
+    b.classList.toggle('active', TAB_NAMES[i] === name));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (name === 'standings') renderStandings();
   if (name === 'schedule') renderSchedule();
   if (name === 'players') renderPlayers();
   if (name === 'live') renderLiveResults();
+  if (name === 'scenarios') renderScenarios();
 }
 
 function renderScreen() {
@@ -203,6 +206,7 @@ function applyUserPreferences(user) {
   if (APP.selectedGoal) document.querySelector(`.goal-btn.${APP.selectedGoal}`)?.classList.add('selected');
   renderAnalysisSummary();
   updateHeaderStatus();
+  renderScenarios();
 }
 
 async function restoreSession() {
@@ -217,6 +221,7 @@ async function restoreSession() {
       renderStandings();
       renderSchedule();
       renderPlayers();
+      renderScenarios();
       runAnalysis();
     }
   } catch (_) {
@@ -259,6 +264,7 @@ async function submitAuth() {
       renderStandings();
       renderSchedule();
       renderPlayers();
+      renderScenarios();
       runAnalysis();
     }
   } catch (error) {
@@ -287,6 +293,7 @@ async function completeSetup() {
   renderStandings();
   renderSchedule();
   renderPlayers();
+  renderScenarios();
   switchTab('analysis');
   runAnalysis();
 }
@@ -316,6 +323,7 @@ async function logout() {
   renderStandings();
   renderSchedule();
   renderPlayers();
+  renderScenarios();
 }
 
 // Helpers
@@ -766,6 +774,7 @@ function selectTeam(code, e) {
   if (e && e.currentTarget) e.currentTarget.classList.add('selected');
   updateHeaderStatus();
   renderAnalysisSummary();
+  renderScenarios();
 }
 
 function selectGoal(g) {
@@ -1255,6 +1264,332 @@ function renderPlayers() {
   el.innerHTML=rosterHtml+leadersHtml;
 }
 
+function renderScenarioOutcomeLine(item) {
+  const winText = item.wins?.length ? `Beats ${item.wins.join(', ')}` : 'No required wins listed';
+  const lossText = item.losses?.length ? `Loses to ${item.losses.join(', ')}` : 'No required losses listed';
+  return `<div class="scenario-team-outcome">
+    <div class="scenario-team-head">
+      <div class="scenario-team-name">${item.team}</div>
+      <div class="scenario-team-record">${item.record}</div>
+    </div>
+    <div class="scenario-split">${winText}</div>
+    <div class="scenario-split">${lossText}</div>
+  </div>`;
+}
+
+function ordinalPlace(value) {
+  const n = Number(value) || 0;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  const mod10 = n % 10;
+  if (mod10 === 1) return `${n}st`;
+  if (mod10 === 2) return `${n}nd`;
+  if (mod10 === 3) return `${n}rd`;
+  return `${n}th`;
+}
+
+function scenarioZoneLabel(rank) {
+  if (rank <= 6) return 'Playoffs';
+  if (rank <= 10) return 'Play-In';
+  return 'Eliminated';
+}
+
+function getScenarioRounds() {
+  const { focusRound, rounds } = getRoundContext();
+  const remainingRounds = rounds.filter(round =>
+    round >= focusRound && APP.allGames.some(game => game.round === round && !game.played)
+  );
+  return remainingRounds;
+}
+
+function getScenarioImportantTeamCodes(myTeam, goalRank, remainingGames) {
+  const cutoffTeam = APP.standings[goalRank - 1];
+  const cutoffWins = cutoffTeam?.w ?? myTeam.w;
+  const threatTeams = APP.standings
+    .filter(team => team.code !== myTeam.code)
+    .map(team => ({
+      code: team.code,
+      rank: team.rank,
+      wins: team.w,
+      threat: getThreatScore(team, myTeam, goalRank, cutoffWins)
+    }))
+    .filter(team =>
+      team.threat >= 8 ||
+      Math.abs(team.rank - myTeam.rank) <= 3 ||
+      Math.abs(team.rank - goalRank) <= 2 ||
+      Math.abs(team.wins - myTeam.w) <= 2
+    )
+    .sort((a, b) => b.threat - a.threat)
+    .slice(0, 7)
+    .map(team => team.code);
+
+  const remainingOpponents = remainingGames
+    .filter(game => game.home.code === myTeam.code || game.away.code === myTeam.code)
+    .map(game => game.home.code === myTeam.code ? game.away.code : game.home.code);
+
+  return [...new Set([myTeam.code, ...remainingOpponents, ...threatTeams])];
+}
+
+function chooseScenarioWinner(game, myTeam, goalRank, goalLabel, mode) {
+  const homeCode = game.home.code;
+  const awayCode = game.away.code;
+  if (homeCode === myTeam.code || awayCode === myTeam.code) {
+    return mode.myOutcome === 'win'
+      ? myTeam.code
+      : (homeCode === myTeam.code ? awayCode : homeCode);
+  }
+
+  const analysis = analyzeGameForTeam(game, myTeam, goalRank, goalLabel);
+  if (analysis?.preferredWinnerCode) {
+    return mode.rivalOutcome === 'help'
+      ? analysis.preferredWinnerCode
+      : (analysis.preferredWinnerCode === homeCode ? awayCode : homeCode);
+  }
+
+  const homeTeam = getTeam(homeCode);
+  const awayTeam = getTeam(awayCode);
+  const cutoffWins = APP.standings[goalRank - 1]?.w ?? myTeam.w;
+  const homeThreat = homeTeam ? getThreatScore(homeTeam, myTeam, goalRank, cutoffWins) : -999;
+  const awayThreat = awayTeam ? getThreatScore(awayTeam, myTeam, goalRank, cutoffWins) : -999;
+  if (mode.rivalOutcome === 'help') return homeThreat <= awayThreat ? homeCode : awayCode;
+  return homeThreat >= awayThreat ? homeCode : awayCode;
+}
+
+function applyScenarioResult(game, winnerCode) {
+  const homeWins = winnerCode === game.home.code;
+  return {
+    ...game,
+    played: true,
+    live: false,
+    status: 'result',
+    home: {
+      ...game.home,
+      score: homeWins ? 80 : 70
+    },
+    away: {
+      ...game.away,
+      score: homeWins ? 70 : 80
+    }
+  };
+}
+
+function buildScenarioOutcomeSummary(teamCode, remainingGames, simulatedGames, simulatedStandings) {
+  const remainingKeys = new Set(remainingGames.map(game => game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`));
+  const relevantGames = simulatedGames.filter(game =>
+    remainingKeys.has(game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`) &&
+    (game.home.code === teamCode || game.away.code === teamCode)
+  );
+  const wins = [];
+  const losses = [];
+  for (const game of relevantGames) {
+    const opponentCode = game.home.code === teamCode ? game.away.code : game.home.code;
+    const winnerCode = winnerCodeForGame(game);
+    if (winnerCode === teamCode) wins.push(displayTeamName(opponentCode));
+    else losses.push(displayTeamName(opponentCode));
+  }
+  const finalRow = simulatedStandings.find(team => team.code === teamCode);
+  return {
+    team: displayTeamName(teamCode),
+    wins,
+    losses,
+    record: finalRow ? `${finalRow.w}-${finalRow.l}` : formatTeamRecord(teamCode).replace(/[()]/g, '')
+  };
+}
+
+function chooseBaselineWinner(game) {
+  const homeTeam = getTeam(game.home.code);
+  const awayTeam = getTeam(game.away.code);
+  if (homeTeam && awayTeam) {
+    if (homeTeam.w !== awayTeam.w) return homeTeam.w > awayTeam.w ? game.home.code : game.away.code;
+    if (homeTeam.rank !== awayTeam.rank) return homeTeam.rank < awayTeam.rank ? game.home.code : game.away.code;
+  }
+  return game.home.code;
+}
+
+function getScenarioImportantGames(myTeam, goalRank, goalLabel, remainingRounds) {
+  const remainingGames = APP.allGames.filter(game =>
+    !game.played && remainingRounds.includes(game.round)
+  );
+  const importantCodes = getScenarioImportantTeamCodes(myTeam, goalRank, remainingGames);
+  return remainingGames
+    .map(game => {
+      const analysis = analyzeGameForTeam(game, myTeam, goalRank, goalLabel);
+      const involvesImportantTeam = importantCodes.includes(game.home.code) || importantCodes.includes(game.away.code);
+      const isMyGame = game.home.code === myTeam.code || game.away.code === myTeam.code;
+      return {
+        ...game,
+        analysis,
+        scenarioWeight: isMyGame ? 999 : Math.max(analysis?.sortScore ?? -999, involvesImportantTeam ? 9 : -999)
+      };
+    })
+    .filter(game => game.scenarioWeight >= 8)
+    .sort((a, b) => b.scenarioWeight - a.scenarioWeight || a.round - b.round)
+    .slice(0, 11);
+}
+
+function summarizeScenarioTeamLine(teamCode, games) {
+  const wins = [];
+  const losses = [];
+  for (const game of games) {
+    if (game.home.code !== teamCode && game.away.code !== teamCode) continue;
+    const opponentCode = game.home.code === teamCode ? game.away.code : game.home.code;
+    const winnerCode = winnerCodeForGame(game);
+    if (winnerCode === teamCode) wins.push(displayTeamName(opponentCode));
+    else losses.push(displayTeamName(opponentCode));
+  }
+  if (!wins.length && !losses.length) return '';
+  const parts = [];
+  if (wins.length) parts.push(`${displayTeamName(teamCode)} beat ${wins.join(', ')}`);
+  if (losses.length) parts.push(`${displayTeamName(teamCode)} lose to ${losses.join(', ')}`);
+  return `${parts.join(' and ')}.`;
+}
+
+function buildScenarioOptionText(myTeam, importantGames, simulatedImportantGames, finalStandings) {
+  const importantCodes = [...new Set(simulatedImportantGames.flatMap(game => [game.home.code, game.away.code]))];
+  const myLine = summarizeScenarioTeamLine(myTeam.code, simulatedImportantGames);
+  const rivalLines = importantCodes
+    .filter(code => code !== myTeam.code)
+    .map(code => summarizeScenarioTeamLine(code, simulatedImportantGames))
+    .filter(Boolean)
+    .slice(0, 4);
+  const myFinalRow = finalStandings.find(team => team.code === myTeam.code);
+  return {
+    text: [myLine, ...rivalLines].join(' '),
+    finalRank: myFinalRow?.rank ?? 99,
+    finalRecord: myFinalRow ? `${myFinalRow.w}-${myFinalRow.l}` : formatTeamRecord(myTeam.code).replace(/[()]/g, '')
+  };
+}
+
+function buildDirectedScenarioOption(myTeam, goalRank, goalLabel, remainingRounds, mode) {
+  const importantGames = getScenarioImportantGames(myTeam, goalRank, goalLabel, remainingRounds);
+  const importantKeys = new Set(importantGames.map(game => game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`));
+  const simulatedGames = APP.allGames.map(game => {
+    if (game.played || !remainingRounds.includes(game.round)) return game;
+    const winnerCode = chooseScenarioWinner(game, myTeam, goalRank, goalLabel, mode);
+    return applyScenarioResult(game, winnerCode);
+  });
+  const simulatedStandings = calcStandings(simulatedGames, {});
+  const simulatedImportantGames = simulatedGames.filter(game =>
+    importantKeys.has(game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`)
+  );
+  const option = buildScenarioOptionText(myTeam, importantGames, simulatedImportantGames, simulatedStandings);
+  return {
+    ...option,
+    zone: scenarioZoneLabel(option.finalRank)
+  };
+}
+
+function enumerateScenarioBuckets(myTeam, goalRank, goalLabel, remainingRounds) {
+  const importantGames = getScenarioImportantGames(myTeam, goalRank, goalLabel, remainingRounds);
+  const importantKeys = new Set(importantGames.map(game => game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`));
+  const totalScenarios = Math.max(1, 2 ** importantGames.length);
+  const buckets = {
+    Playoffs: { label: 'Playoff scenarios', zone: 'Playoffs', count: 0, options: new Map() },
+    'Play-In': { label: 'Play-In scenarios', zone: 'Play-In', count: 0, options: new Map() },
+    Eliminated: { label: 'Cut out scenarios', zone: 'Eliminated', count: 0, options: new Map() }
+  };
+
+  for (let mask = 0; mask < totalScenarios; mask += 1) {
+    const simulatedGames = APP.allGames.map(game => {
+      if (game.played || !remainingRounds.includes(game.round)) return game;
+      const key = game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`;
+      if (importantKeys.has(key)) {
+        const index = importantGames.findIndex(item => (item.gameCode || `${item.home.code}-${item.away.code}-${item.round}`) === key);
+        const winnerCode = ((mask >> index) & 1) === 1 ? game.home.code : game.away.code;
+        return applyScenarioResult(game, winnerCode);
+      }
+      return applyScenarioResult(game, chooseBaselineWinner(game));
+    });
+
+    const simulatedStandings = calcStandings(simulatedGames, {});
+    const myFinalRow = simulatedStandings.find(team => team.code === myTeam.code);
+    const zone = scenarioZoneLabel(myFinalRow?.rank ?? 99);
+    const simulatedImportantGames = simulatedGames.filter(game => importantKeys.has(game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`));
+    const option = buildScenarioOptionText(myTeam, importantGames, simulatedImportantGames, simulatedStandings);
+    const bucket = buckets[zone];
+    bucket.count += 1;
+    if (!bucket.options.has(option.text)) {
+      bucket.options.set(option.text, { ...option, count: 0 });
+    }
+    bucket.options.get(option.text).count += 1;
+  }
+
+  const directedFallbacks = [
+    { zone: 'Playoffs', mode: { myOutcome: 'win', rivalOutcome: 'help' } },
+    { zone: 'Play-In', mode: { myOutcome: 'win', rivalOutcome: 'hurt' } },
+    { zone: 'Eliminated', mode: { myOutcome: 'lose', rivalOutcome: 'hurt' } }
+  ];
+  for (const fallback of directedFallbacks) {
+    const directedOption = buildDirectedScenarioOption(myTeam, goalRank, goalLabel, remainingRounds, fallback.mode);
+    if (directedOption.zone !== fallback.zone) continue;
+    const bucket = buckets[fallback.zone];
+    if (!bucket.options.has(directedOption.text)) {
+      bucket.options.set(directedOption.text, { ...directedOption, count: 0, rarePath: true });
+    }
+  }
+
+  return { importantGames, totalScenarios, buckets: Object.values(buckets) };
+}
+
+function renderScenarios() {
+  const el = document.getElementById('scenarios-content');
+  if (!el) return;
+
+  if (!APP.selectedTeam) {
+    el.innerHTML = '<div class="no-selection">Select a team to view its scenario paths.</div>';
+    return;
+  }
+
+  const myTeam = getTeam(APP.selectedTeam);
+  if (!myTeam) {
+    el.innerHTML = `<div class="scenario-empty">
+      <div class="section-title" style="margin-bottom:10px">Scenarios</div>
+      <div class="summary-lede">Standings data is not ready yet for ${displayTeamName(APP.selectedTeam)}.</div>
+    </div>`;
+    return;
+  }
+
+  const goalRank = APP.selectedGoal === 'playoffs' ? 6 : 10;
+  const goalLabel = APP.selectedGoal === 'playoffs' ? 'Playoffs' : 'Play-In';
+  const remainingRounds = getScenarioRounds();
+  if (!remainingRounds.length) {
+    el.innerHTML = `<div class="scenario-empty">
+      <div class="section-title" style="margin-bottom:10px">Scenarios</div>
+      <div class="summary-lede">The season is already decided for ${displayTeamName(APP.selectedTeam)}. No future rounds remain.</div>
+    </div>`;
+    return;
+  }
+
+  const { importantGames, totalScenarios, buckets } = enumerateScenarioBuckets(myTeam, goalRank, goalLabel, remainingRounds);
+  const cards = buckets.map(bucket => {
+    const percent = bucket.count > 0 ? `${((bucket.count / totalScenarios) * 100).toFixed(1)}%` : bucket.options.size ? '<0.1%' : '0.0%';
+    const options = [...bucket.options.values()]
+      .sort((a, b) => b.count - a.count || a.finalRank - b.finalRank)
+      .slice(0, 6)
+      .map((option, index) => `<li class="scenario-option-item">
+        <span class="scenario-option-title">Option ${index + 1} - Finish ${ordinalPlace(option.finalRank)}${option.count > 0 ? ` - ${((option.count / totalScenarios) * 100).toFixed(1)}%` : option.rarePath ? ' - rare path' : ''}</span>
+        <span class="scenario-option-copy">${option.text}</span>
+      </li>`)
+      .join('');
+    return `<article class="scenario-card">
+      <div class="scenario-bucket-head">
+        <div>
+          <div class="scenario-title">${bucket.label}</div>
+          <div class="scenario-bucket-meta">${bucket.count} of ${totalScenarios} important-game outcomes${bucket.count === 0 && bucket.options.size ? ' in the main model, but a rare path was still found' : ''}</div>
+        </div>
+        <div class="scenario-percent">${percent}</div>
+      </div>
+      <ol class="scenario-option-list">${options || '<li class="scenario-option-item"><span class="scenario-option-copy">No options found.</span></li>'}</ol>
+    </article>`;
+  }).join('');
+
+  el.innerHTML = `<section class="scenario-intro">
+    <div class="section-title" style="margin-bottom:8px">${displayTeamName(APP.selectedTeam)} scenarios after Round ${remainingRounds[0] - 1}</div>
+    <div class="summary-lede">The app is using rounds ${remainingRounds.join(', ')} and enumerating ${importantGames.length} important games. Percentages are based on those important-game combinations, while the other remaining games are filled with a simple baseline result.</div>
+  </section>
+  <div class="scenario-stack">${cards}</div>`;
+}
+
 function getLiveGameWindow(daysAhead = 3) {
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -1381,6 +1716,7 @@ async function refreshLiveViews() {
   renderStandings();
   renderSchedule();
   renderLiveResults();
+  renderScenarios();
   if (APP.selectedTeam) runAnalysis();
 }
 

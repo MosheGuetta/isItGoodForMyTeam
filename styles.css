@@ -149,7 +149,7 @@ body{
 .auth-submit{margin-top:4px}
 .tabs{
   display:grid;
-  grid-template-columns:repeat(5,1fr);
+  grid-template-columns:repeat(6,1fr);
   background:linear-gradient(90deg,rgba(26,11,43,.86),rgba(12,25,50,.86));
   border-bottom:1px solid rgba(255,255,255,.05);
   border-radius:18px 18px 0 0;
@@ -634,6 +634,132 @@ body{
 .leader-name{font-size:.72rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .leader-team{font-size:.6rem;color:var(--muted)}
 .leader-val{font-size:.8rem;font-weight:800}
+.scenario-intro,.scenario-card,.scenario-empty{
+  padding:18px 20px;
+  background:linear-gradient(180deg,rgba(28,27,44,.98),rgba(22,21,34,.98));
+  border:1px solid rgba(95,92,132,.38);
+  border-radius:18px;
+}
+.scenario-intro{margin-bottom:16px}
+.scenario-stack{display:flex;flex-direction:column;gap:16px}
+.scenario-bucket-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:14px;
+}
+.scenario-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:16px;
+}
+.scenario-bucket-meta{
+  margin-top:6px;
+  color:var(--muted);
+  font-size:.8rem;
+  font-weight:700;
+}
+.scenario-percent{
+  min-width:82px;
+  padding:10px 12px;
+  border-radius:14px;
+  background:rgba(255,138,29,.12);
+  border:1px solid rgba(255,138,29,.22);
+  color:#ffd2a6;
+  font-size:1rem;
+  font-weight:900;
+  text-align:center;
+}
+.scenario-kicker{
+  margin-bottom:8px;
+  color:#ffb869;
+  font-size:.76rem;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+.scenario-title{
+  font-size:1.25rem;
+  font-weight:900;
+  line-height:1.2;
+  color:#fff3de;
+}
+.scenario-placement{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:4px;
+  min-width:120px;
+}
+.scenario-placement-rank{
+  color:var(--accent);
+  font-size:1rem;
+  font-weight:900;
+}
+.scenario-placement-record{
+  color:var(--muted);
+  font-size:.82rem;
+  font-weight:700;
+}
+.scenario-outcome-list{display:flex;flex-direction:column;gap:12px}
+.scenario-team-outcome{
+  padding:14px 16px;
+  border-radius:16px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+}
+.scenario-team-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:8px;
+}
+.scenario-team-name{font-size:.95rem;font-weight:800;color:#edf1fb}
+.scenario-team-record{font-size:.76rem;font-weight:800;color:#ffb869}
+.scenario-split{
+  color:#c9d0e4;
+  font-size:.86rem;
+  line-height:1.55;
+}
+.scenario-split + .scenario-split{margin-top:4px}
+.scenario-explanation{
+  margin-top:16px;
+  padding-top:16px;
+  border-top:1px solid rgba(255,255,255,.08);
+}
+.scenario-explanation p{
+  color:#d7dcef;
+  font-size:.9rem;
+  line-height:1.6;
+}
+.scenario-explanation p + p{margin-top:10px}
+.scenario-option-list{
+  margin:0;
+  padding-left:22px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.scenario-option-item{
+  color:#dfe5f5;
+  line-height:1.55;
+}
+.scenario-option-title{
+  display:block;
+  margin-bottom:4px;
+  color:#ffb869;
+  font-size:.82rem;
+  font-weight:800;
+}
+.scenario-option-copy{
+  display:block;
+  color:#d7dcef;
+  font-size:.9rem;
+}
 .no-selection,.error-msg{padding:28px 20px;text-align:center;color:var(--muted);line-height:1.6}
 .error-msg{color:#ffb3bd}
 @media (max-width:720px){
@@ -657,4 +783,7 @@ body{
   .result-alert-title{font-size:1.35rem}
   .live-game-body{grid-template-columns:1fr;justify-items:center}
   .live-score{order:-1}
+  .scenario-header{flex-direction:column}
+  .scenario-bucket-head{flex-direction:column}
+  .scenario-placement{align-items:flex-start;min-width:0}
 }
