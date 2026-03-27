@@ -5,8 +5,11 @@ const crypto = require('crypto');
 const { URL } = require('url');
 
 const port = Number(process.env.PORT || 8000);
-const root = __dirname;
+const root = path.resolve(__dirname, '..');
 const usersFile = path.join(root, 'users.json');
+const clientDistRoot = path.join(root, 'client', 'dist');
+const legacyRoot = root;
+const staticRoot = fs.existsSync(clientDistRoot) ? clientDistRoot : legacyRoot;
 const EUROLEAGUE_SITE = 'https://www.euroleaguebasketball.net';
 const EUROLEAGUE_FEED_BASE = 'https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E';
 const DEFAULT_SEASON_CODE = 'E2025';
@@ -76,7 +79,12 @@ function writeUsers(data) {
 }
 
 function writeJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS'
+  });
   res.end(JSON.stringify(payload));
 }
 
@@ -463,10 +471,7 @@ function handleLogout(req, res) {
   writeJson(res, 200, { ok: true });
 }
 
-function serveStatic(parsedUrl, res) {
-  const requestPath = parsedUrl.pathname === '/' ? '/index.html' : parsedUrl.pathname;
-  const filePath = path.join(root, decodeURIComponent(requestPath));
-
+function writeStatic(res, filePath) {
   fs.readFile(filePath, (error, data) => {
     if (error) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -481,8 +486,35 @@ function serveStatic(parsedUrl, res) {
   });
 }
 
+function serveStatic(parsedUrl, res) {
+  let requestPath = decodeURIComponent(parsedUrl.pathname);
+  if (requestPath === '/') {
+    requestPath = '/index.html';
+  }
+
+  const requestedPath = path.normalize(path.join(staticRoot, requestPath));
+  if (!requestedPath.startsWith(staticRoot)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+
+  if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
+    writeStatic(res, requestedPath);
+    return;
+  }
+
+  const spaFallback = path.join(staticRoot, 'index.html');
+  writeStatic(res, spaFallback);
+}
+
 http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://localhost:${port}`);
+
+  if (req.method === 'OPTIONS') {
+    writeJson(res, 204, {});
+    return;
+  }
 
   try {
     if (req.method === 'GET' && parsedUrl.pathname === '/api/euroleague/live-data') {
@@ -524,4 +556,5 @@ http.createServer(async (req, res) => {
 }).listen(port, () => {
   ensureUsersFile();
   console.log(`Server running at http://localhost:${port}`);
+  console.log(`Static root: ${staticRoot}`);
 });

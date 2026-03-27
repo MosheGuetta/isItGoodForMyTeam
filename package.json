@@ -2,10 +2,16 @@
   "name": "is-that-good-for-my-team",
   "version": "1.0.0",
   "private": true,
-  "description": "EuroLeague team outcome app with a small Node server",
-  "main": "server.js",
+  "description": "EuroLeague team outcome app with a mobile-ready React client and Node API",
+  "main": "server/server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server/server.js",
+    "dev:server": "node server/server.js",
+    "dev:client": "npm --prefix client run dev",
+    "build:client": "npm --prefix client run build",
+    "mobile:sync": "npm --prefix client run sync",
+    "mobile:android": "npm --prefix client run android",
+    "mobile:ios": "npm --prefix client run ios"
   },
   "engines": {
     "node": ">=18"

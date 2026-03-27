@@ -4,6 +4,7 @@ const CLUBS_DATA = window.__CLUBS__;
 const STATS_DATA = window.__STATS__;
 const META_DATA  = window.__META__;
 const MEDALS = ['1.','2.','3.','4.','5.'];
+const LIVE_POLL_INTERVAL_MS = 3 * 60 * 1000;
 // Keep the bundled snapshot aligned with the known official order when live data is unavailable.
 const SNAPSHOT_STANDINGS_OVERRIDES = {
   ULK: 1,
@@ -14,16 +15,18 @@ const SNAPSHOT_STANDINGS_OVERRIDES = {
   ZAL: 6,
   MCO: 7,
   PAN: 8,
-  BAR: 9,
-  RED: 10,
-  DUB: 11,
-  TEL: 12,
+  RED: 9,
+  BAR: 10,
+  TEL: 11,
+  DUB: 12,
   MIL: 13,
-  VIR: 14,
-  PRS: 15,
-  MUN: 16,
-  PAR: 17,
-  IST: 18
+  MUN: 14,
+  VIR: 15,
+  PAR: 16,
+  PRS: 17,
+  IST: 18,
+  BAS: 19,
+  ASV: 20
 };
 
 const APP = {
@@ -59,17 +62,20 @@ async function init() {
   renderStandings();
   renderSchedule();
   renderPlayers();
+  renderLiveResults();
+  startLivePolling();
 }
 
 // Tabs
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b,i) =>
-    b.classList.toggle('active', ['analysis','standings','schedule','players'][i] === name));
+    b.classList.toggle('active', ['analysis','standings','schedule','players','live'][i] === name));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if (name === 'standings') renderStandings();
   if (name === 'schedule') renderSchedule();
   if (name === 'players') renderPlayers();
+  if (name === 'live') renderLiveResults();
 }
 
 function renderScreen() {
@@ -510,7 +516,8 @@ async function loadLiveData() {
       maxRound: live.maxRound || null,
       allAvailableRounds: Array.isArray(live.allAvailableRounds) ? live.allAvailableRounds : [],
       currentSeasonCode: live.currentSeasonCode || null,
-      source: live.source || 'live'
+      source: live.source || 'live',
+      fetchedAt: live.fetchedAt || null
     };
   } catch (_) {
     APP.officialStandingsStats = null;
@@ -617,6 +624,10 @@ function normalizeGames(games) {
     round: Number(g.round ?? g.roundNumber ?? 0),
     date: g.date ?? g.startDate ?? g.datetime ?? null,
     played: isPlayedGame(g),
+    live: isLiveGame(g),
+    status: g.status ?? null,
+    minute: g.minute ?? null,
+    quarter: g.quarter ?? null,
     home: {
       code: g.home?.code ?? g.home?.clubCode ?? g.home?.tlaCode ?? g.homeTeam?.code ?? g.homeTeam?.tla ?? '',
       score: Number(g.home?.score ?? g.homeScore ?? g.homePoints ?? 0)
@@ -631,7 +642,13 @@ function normalizeGames(games) {
 function isPlayedGame(game) {
   if (typeof game.played === 'boolean') return game.played;
   const status = String(game.status || '').toLowerCase();
-  return status === 'result' || status === 'final';
+  return ['result', 'final', 'finished', 'played'].includes(status);
+}
+
+function isLiveGame(game) {
+  if (typeof game.live === 'boolean') return game.live;
+  const status = String(game.status || '').toLowerCase();
+  return ['live', 'playing', 'in_progress', 'in progress'].includes(status);
 }
 
 // Standings calculation
@@ -1262,6 +1279,102 @@ function teamLabel(code) {
   return TEAM_DISPLAY_NAMES[code] || clubOf(code).name || code;
 }
 
+function getLiveGameWindow(daysAhead = 3) {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const games = APP.allGames || [];
+  const live = games.filter(game => game.live);
+  const recentResults = games.filter(game => {
+    if (!game.played || !game.date) return false;
+    const ts = new Date(game.date).getTime();
+    return Number.isFinite(ts) && now - ts <= dayMs;
+  });
+  const upcoming = games.filter(game => {
+    if (game.played || game.live || !game.date) return false;
+    const ts = new Date(game.date).getTime();
+    return Number.isFinite(ts) && ts >= now && ts - now <= daysAhead * dayMs;
+  });
+  return { live, recentResults, upcoming };
+}
+
+function renderLiveResults() {
+  const el = document.getElementById('live-results-content');
+  if (!el) return;
+
+  const { live, recentResults, upcoming } = getLiveGameWindow();
+  const round = APP.liveMeta?.currentRound;
+  const selectedCode = APP.selectedTeam;
+
+  function renderBadge(game) {
+    if (game.live) {
+      const detail = [game.quarter, game.minute].filter(Boolean).join(' ');
+      return `<span class="live-badge">LIVE${detail ? ` ${detail}` : ''}</span>`;
+    }
+    if (game.played) return '<span class="final-badge">FINAL</span>';
+    if (!game.date) return '<span class="upcoming-badge">TBD</span>';
+    const ts = new Date(game.date);
+    return `<span class="upcoming-badge">${ts.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>`;
+  }
+
+  function renderCard(game) {
+    const homeClub = clubOf(game.home.code);
+    const awayClub = clubOf(game.away.code);
+    const isMine = selectedCode && (game.home.code === selectedCode || game.away.code === selectedCode);
+    const scoreMarkup = game.live || game.played
+      ? `<span class="live-score">${game.home.score} - ${game.away.score}</span>`
+      : '<span class="live-score live-score--tbd">vs</span>';
+    return `<article class="live-game-card${isMine ? ' live-game-card--mine' : ''}">
+      <div class="live-game-header">${renderBadge(game)}</div>
+      <div class="live-game-body">
+        <div class="live-team">${renderLogoMarkup(homeClub, 'sm')}<span>${homeClub.abbr || game.home.code}</span></div>
+        ${scoreMarkup}
+        <div class="live-team">${renderLogoMarkup(awayClub, 'sm')}<span>${awayClub.abbr || game.away.code}</span></div>
+      </div>
+    </article>`;
+  }
+
+  const sections = [];
+  if (live.length) {
+    sections.push(`<section class="live-section"><div class="live-section-title">Live Now</div><div class="live-games-grid">${live.map(renderCard).join('')}</div></section>`);
+  }
+  if (recentResults.length) {
+    sections.push(`<section class="live-section"><div class="live-section-title">${round ? `Round ${round} ` : ''}Results</div><div class="live-games-grid">${recentResults.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)).map(renderCard).join('')}</div></section>`);
+  }
+  if (upcoming.length) {
+    sections.push(`<section class="live-section"><div class="live-section-title">${round ? `Round ${round} ` : ''}Upcoming</div><div class="live-games-grid">${upcoming.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0)).map(renderCard).join('')}</div></section>`);
+  }
+
+  const source = APP.liveMeta?.source === 'live' ? 'Live data' : APP.liveMeta?.source === 'feed-fallback' ? 'Fallback data' : 'Snapshot data';
+  const updated = APP.liveMeta?.fetchedAt
+    ? `Updated ${new Date(APP.liveMeta.fetchedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+    : '';
+  el.innerHTML = `<div class="live-results-header">
+    <span class="live-data-source">${source}${updated ? ` · ${updated}` : ''}</span>
+    <button class="secondary-btn compact-btn" onclick="refreshLiveResults()">Refresh Live</button>
+  </div>${sections.join('') || '<div class="no-results">No recent or upcoming games found.</div>'}`;
+}
+
+async function refreshLiveResults() {
+  await refreshLiveViews();
+}
+
+async function refreshLiveViews() {
+  await loadLiveData();
+  const calculatedStandings = calcStandings(APP.allGames, APP.officialStandingsTable);
+  APP.standings = mergeStandings(calculatedStandings, APP.officialStandingsStats);
+  renderStandings();
+  renderSchedule();
+  renderLiveResults();
+  if (APP.selectedTeam) runAnalysis();
+}
+
+function startLivePolling() {
+  window.clearInterval(window.__igtmtLivePollTimer);
+  window.__igtmtLivePollTimer = window.setInterval(() => {
+    refreshLiveViews().catch(error => console.warn('Auto-refresh error:', error));
+  }, LIVE_POLL_INTERVAL_MS);
+}
+
 window.switchTab = switchTab;
 window.setAuthMode = setAuthMode;
 window.submitAuth = submitAuth;
@@ -1272,6 +1385,7 @@ window.selectTeam = selectTeam;
 window.selectGoal = selectGoal;
 window.runAnalysis = runAnalysis;
 window.closeResultAlert = closeResultAlert;
+window.refreshLiveResults = refreshLiveResults;
 
 export function initLegacyApp() {
   if (hasInitialized) return;

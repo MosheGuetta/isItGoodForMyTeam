@@ -149,7 +149,7 @@ body{
 .auth-submit{margin-top:4px}
 .tabs{
   display:grid;
-  grid-template-columns:repeat(4,1fr);
+  grid-template-columns:repeat(5,1fr);
   background:linear-gradient(90deg,rgba(26,11,43,.86),rgba(12,25,50,.86));
   border-bottom:1px solid rgba(255,255,255,.05);
   border-radius:18px 18px 0 0;
@@ -192,6 +192,118 @@ body{
 }
 .analysis-actions{display:flex;gap:10px;flex-wrap:wrap}
 .compact-btn{width:auto;min-width:170px}
+.live-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 10px;
+  border-radius:999px;
+  background:#d44545;
+  color:#fff;
+  font-size:.68rem;
+  font-weight:800;
+  letter-spacing:.05em;
+  animation:livePulse 1.4s ease-in-out infinite;
+}
+.final-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:4px 10px;
+  border-radius:999px;
+  background:#3d8b52;
+  color:#fff;
+  font-size:.68rem;
+  font-weight:800;
+  letter-spacing:.05em;
+}
+.upcoming-badge{
+  color:#98a2bf;
+  font-size:.72rem;
+  font-weight:700;
+}
+.live-results-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  flex-wrap:wrap;
+  margin-bottom:18px;
+  padding-bottom:12px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+.live-data-source{
+  color:#98a2bf;
+  font-size:.78rem;
+  font-weight:700;
+}
+.live-section{margin-bottom:22px}
+.live-section-title{
+  margin-bottom:12px;
+  color:var(--accent);
+  font-size:.88rem;
+  font-weight:800;
+  letter-spacing:.03em;
+  text-transform:uppercase;
+}
+.live-games-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:12px;
+}
+.live-game-card{
+  padding:14px;
+  border-radius:16px;
+  background:linear-gradient(180deg,rgba(28,27,44,.98),rgba(22,21,34,.98));
+  border:1px solid rgba(95,92,132,.38);
+  box-shadow:0 14px 28px rgba(0,0,0,.18);
+}
+.live-game-card--mine{
+  border-color:rgba(255,138,29,.72);
+  box-shadow:0 0 0 1px rgba(255,138,29,.22) inset,0 14px 28px rgba(0,0,0,.18);
+}
+.live-game-header{
+  min-height:24px;
+  margin-bottom:10px;
+}
+.live-game-body{
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  align-items:center;
+  gap:10px;
+}
+.live-team{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  text-align:center;
+  color:#edf1fb;
+  font-size:.78rem;
+  font-weight:800;
+}
+.live-score{
+  color:#f8f3eb;
+  font-size:1.24rem;
+  font-weight:900;
+  text-align:center;
+}
+.live-score--tbd{
+  color:#98a2bf;
+  font-size:.92rem;
+  font-weight:800;
+}
+.no-results{
+  padding:28px 16px;
+  border-radius:16px;
+  background:rgba(255,255,255,.03);
+  border:1px dashed rgba(255,255,255,.08);
+  color:#98a2bf;
+  text-align:center;
+}
+@keyframes livePulse{
+  0%,100%{opacity:1}
+  50%{opacity:.62}
+}
 .analysis-chip{
   display:inline-flex;
   align-items:center;
@@ -480,4 +592,6 @@ body{
   .verdict-copy{font-size:.92rem}
   .result-alert-card{padding:20px}
   .result-alert-title{font-size:1.35rem}
+  .live-game-body{grid-template-columns:1fr;justify-items:center}
+  .live-score{order:-1}
 }
