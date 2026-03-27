@@ -48,6 +48,15 @@ const APP = {
   authBusy: false
 };
 
+const TEAM_CODE_ALIASES = {
+  MTA: 'TEL'
+};
+
+function normalizeTeamCode(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  return TEAM_CODE_ALIASES[normalized] || normalized;
+}
+
 function getLivePollInterval() {
   return APP.liveMeta?.anyLive ? LIVE_POLL_INTERVAL_LIVE_MS : LIVE_POLL_INTERVAL_MS;
 }
@@ -187,7 +196,7 @@ function setSession(token, user) {
 
 function applyUserPreferences(user) {
   const preferences = user?.preferences || null;
-  APP.selectedTeam = preferences?.team || null;
+  APP.selectedTeam = normalizeTeamCode(preferences?.team || null) || null;
   APP.selectedGoal = preferences?.goal || null;
   renderTeamGrid();
   document.querySelectorAll('.goal-btn').forEach(btn => btn.classList.remove('selected'));
@@ -310,12 +319,32 @@ async function logout() {
 }
 
 // Helpers
-function getTeam(c) { return APP.standings.find(s => s.code === c); }
-function clubOf(c) { return APP.clubs[c] || {abbr:c, name:c, logo:''}; }
+function getTeam(c) {
+  const code = normalizeTeamCode(c);
+  return APP.standings.find(s => s.code === code);
+}
+function clubOf(c) {
+  const code = normalizeTeamCode(c);
+  return APP.clubs[code] || {abbr:code, name:code, logo:''};
+}
 function displayTeamName(c) { return teamLabel(c); }
+function getTeamRecordParts(code) {
+  const normalizedCode = normalizeTeamCode(code);
+  const team = getTeam(normalizedCode) || APP.officialStandingsStats?.find(item => item.code === normalizedCode) || null;
+  if (team && Number.isFinite(team.w) && Number.isFinite(team.l)) {
+    return { w: team.w, l: team.l };
+  }
+
+  const calculated = calcStandings(APP.allGames || [], APP.officialStandingsTable || {}).find(item => item.code === normalizedCode) || null;
+  if (calculated && Number.isFinite(calculated.w) && Number.isFinite(calculated.l)) {
+    return { w: calculated.w, l: calculated.l };
+  }
+
+  return { w: 0, l: 0 };
+}
 function formatTeamRecord(code) {
-  const team = getTeam(code);
-  return team ? `(${team.w}-${team.l})` : '';
+  const record = getTeamRecordParts(code);
+  return `(${record.w}-${record.l})`;
 }
 function rankZone(r) { return r<=6 ? 'playoff' : r<=10 ? 'playin' : 'out'; }
 function zoneColor(z) { return z==='playoff' ? '#4CAF50' : z==='playin' ? '#2196F3' : '#f44336'; }
@@ -572,10 +601,10 @@ function normalizeOfficialStandingRow(row, standingsTable) {
     row?.rank ??
     standingsTable?.[code]
   );
-  const wins = toNumber(row?.W ?? row?.wins ?? row?.Wins);
-  const losses = toNumber(row?.L ?? row?.losses ?? row?.Losses);
-  const ptsFor = toNumber(row?.['Pts+'] ?? row?.PtsPlus ?? row?.ptsFor ?? row?.pointsFor);
-  const ptsAgainst = toNumber(row?.['Pts-'] ?? row?.PtsMinus ?? row?.ptsAgainst ?? row?.pointsAgainst);
+  const wins = toNumber(row?.W ?? row?.w ?? row?.wins ?? row?.Wins);
+  const losses = toNumber(row?.L ?? row?.l ?? row?.losses ?? row?.Losses);
+  const ptsFor = toNumber(row?.['Pts+'] ?? row?.pts ?? row?.PtsPlus ?? row?.ptsFor ?? row?.pointsFor);
+  const ptsAgainst = toNumber(row?.['Pts-'] ?? row?.ptsA ?? row?.PtsMinus ?? row?.ptsAgainst ?? row?.pointsAgainst);
   const home = splitRecord(row?.H ?? row?.home ?? row?.Home);
   const away = splitRecord(row?.A ?? row?.away ?? row?.Away);
   const last10 = splitLast10(row?.L10 ?? row?.last10 ?? row?.Last10);
@@ -636,11 +665,11 @@ function normalizeGames(games) {
     quarterMinute: g.quarterMinute ?? g.remainingTime ?? null,
     remainingTime: g.remainingTime ?? null,
     home: {
-      code: g.home?.code ?? g.home?.clubCode ?? g.home?.tlaCode ?? g.homeTeam?.code ?? g.homeTeam?.tla ?? '',
+      code: normalizeTeamCode(g.home?.code ?? g.home?.clubCode ?? g.home?.tlaCode ?? g.homeTeam?.code ?? g.homeTeam?.tla ?? ''),
       score: Number(g.home?.score ?? g.homeScore ?? g.homePoints ?? 0)
     },
     away: {
-      code: g.away?.code ?? g.away?.clubCode ?? g.away?.tlaCode ?? g.awayTeam?.code ?? g.awayTeam?.tla ?? '',
+      code: normalizeTeamCode(g.away?.code ?? g.away?.clubCode ?? g.away?.tlaCode ?? g.awayTeam?.code ?? g.awayTeam?.tla ?? ''),
       score: Number(g.away?.score ?? g.awayScore ?? g.awayPoints ?? 0)
     }
   }));
@@ -722,16 +751,17 @@ function renderTeamGrid() {
   document.getElementById('teamGrid').innerHTML = APP.standings.map(t => {
     const c = clubOf(t.code);
     const sel = APP.selectedTeam === t.code ? ' selected' : '';
+    const record = getTeamRecordParts(t.code);
     return `<div class="team-card${sel}" onclick="selectTeam('${t.code}',event)">
       ${renderLogoMarkup(c)}
       <div class="team-name">${teamLabel(t.code)}</div>
-      <div class="team-record">${t.w}-${t.l}</div>
+      <div class="team-record">${record.w}-${record.l}</div>
     </div>`;
   }).join('');
 }
 
 function selectTeam(code, e) {
-  APP.selectedTeam = code;
+  APP.selectedTeam = normalizeTeamCode(code);
   document.querySelectorAll('.team-card').forEach(c => c.classList.remove('selected'));
   if (e && e.currentTarget) e.currentTarget.classList.add('selected');
   updateHeaderStatus();
@@ -1313,9 +1343,8 @@ function renderLiveResults() {
         <div class="live-score-stack">
           ${scoreMarkup}
           ${clock ? `<div class="live-game-clock">${clock}</div>` : ''}
-          ${wantedLabel ? `<div class="wanted-result-label">${wantedLabel}</div>` : ''}
         </div>
-        <div class="live-team">${renderLogoMarkup(awayClub, 'sm')}<span>${awayClub.abbr || game.away.code}</span></div>
+        <div class="live-team">${renderLogoMarkup(awayClub, 'sm')}<span>${awayClub.abbr || game.away.code}</span>${wantedLabel ? `<div class="wanted-result-label">${wantedLabel}</div>` : ''}</div>
       </div>
     </article>`;
   }
@@ -1425,7 +1454,8 @@ async function patchPlayerTeams() {
 }
 
 function teamLabel(code) {
-  return TEAM_DISPLAY_NAMES[code] || clubOf(code).name || code;
+  const normalizedCode = normalizeTeamCode(code);
+  return TEAM_DISPLAY_NAMES[normalizedCode] || clubOf(normalizedCode).name || normalizedCode;
 }
 
 // Start

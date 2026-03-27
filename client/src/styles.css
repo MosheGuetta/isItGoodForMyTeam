@@ -356,6 +356,7 @@ body{
   font-weight:800;
   letter-spacing:.04em;
   text-align:center;
+  line-height:1.25;
 }
 .no-results{
   padding:28px 16px;
