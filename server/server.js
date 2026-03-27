@@ -10,12 +10,10 @@ const usersFile = path.join(root, 'users.json');
 const clientDistRoot = path.join(root, 'client', 'dist');
 const legacyRoot = root;
 const staticRoot = fs.existsSync(clientDistRoot) ? clientDistRoot : legacyRoot;
-const EUROLEAGUE_SITE = 'https://www.euroleaguebasketball.net';
 const EUROLEAGUE_FEED_BASE = 'https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E';
 const DEFAULT_SEASON_CODE = 'E2025';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const LIVE_CACHE_TTL_MS = 1000 * 60 * 5;
-const NEXT_DATA_REGEX = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/i;
 const TEAM_TLA_MAP = {
   BAR: 'BAR',
   BAY: 'MUN',
@@ -158,22 +156,6 @@ function isValidGoal(goal) {
   return goal === 'playoffs' || goal === 'playin';
 }
 
-async function fetchText(url) {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache'
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
-  }
-  return response.text();
-}
-
 async function fetchJson(url) {
   const response = await fetch(url, {
     headers: {
@@ -190,18 +172,6 @@ async function fetchJson(url) {
 function mapTeamCode(code) {
   const normalized = String(code || '').trim().toUpperCase();
   return TEAM_TLA_MAP[normalized] || normalized;
-}
-
-function parseNextData(html, sourceUrl) {
-  const match = String(html || '').match(NEXT_DATA_REGEX);
-  if (!match) {
-    throw new Error(`__NEXT_DATA__ not found for ${sourceUrl}`);
-  }
-  return JSON.parse(match[1]);
-}
-
-function extractPageProps(nextData) {
-  return nextData?.props?.pageProps ?? nextData?.pageProps ?? {};
 }
 
 function normalizeGame(game) {
@@ -260,17 +230,57 @@ function normalizeStandingsRow(group) {
 }
 
 async function fetchSeasonGamesFromFeed(seasonCode = DEFAULT_SEASON_CODE) {
-  const games = [];
+  const url = `${EUROLEAGUE_FEED_BASE}/seasons/${seasonCode}/games?limit=400`;
+  const payload = await fetchJson(url);
+  const rawGames = Array.isArray(payload?.data) ? payload.data : [];
+  return rawGames.map(normalizeGame);
+}
 
-  for (let round = 1; round <= 50; round += 1) {
-    const url = `${EUROLEAGUE_FEED_BASE}/seasons/${seasonCode}/games?teamCode=&phaseTypeCode=RS&roundNumber=${round}`;
-    const payload = await fetchJson(url);
-    const roundGames = Array.isArray(payload?.data) ? payload.data : [];
-    if (!roundGames.length) break;
-    games.push(...roundGames.map(normalizeGame));
+async function fetchRoundsFromFeed(seasonCode = DEFAULT_SEASON_CODE) {
+  const payload = await fetchJson(`${EUROLEAGUE_FEED_BASE}/seasons/${seasonCode}/rounds`);
+  const rounds = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+  return rounds
+    .map(entry => Number(entry?.round ?? entry))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+}
+
+function normalizeOfficialStandingsRow(entry, position) {
+  const club = entry?.club ?? {};
+  const data = entry?.data ?? {};
+  const code = mapTeamCode(club.code ?? club.tvCode ?? club.tla ?? '');
+  if (!code) return null;
+  return {
+    code,
+    rank: Number(data.position ?? position ?? 99),
+    w: Number(data.gamesWon ?? 0),
+    l: Number(data.gamesLost ?? 0),
+    pts: Number(data.pointsFavour ?? 0),
+    ptsA: Number(data.pointsAgainst ?? 0),
+    homeW: 0,
+    homeL: 0,
+    awayW: 0,
+    awayL: 0,
+    last10: []
+  };
+}
+
+async function fetchStandingsFromFeed(round, seasonCode = DEFAULT_SEASON_CODE) {
+  if (!Number.isFinite(round)) {
+    return { standingsStats: [], teamStandingsTable: {} };
   }
 
-  return games;
+  const payload = await fetchJson(`${EUROLEAGUE_FEED_BASE}/seasons/${seasonCode}/rounds/${round}/standings`);
+  const groups = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+  const rows = groups.find(group => Array.isArray(group?.standings) && group.standings.length)?.standings ?? [];
+  const standingsStats = rows.map((entry, index) => normalizeOfficialStandingsRow(entry, index + 1)).filter(Boolean);
+  const teamStandingsTable = Object.fromEntries(
+    standingsStats
+      .filter(row => row.code)
+      .map(row => [row.code, row.rank])
+  );
+
+  return { standingsStats, teamStandingsTable };
 }
 
 function deriveCurrentRound(games) {
@@ -292,7 +302,9 @@ function deriveCurrentRound(games) {
 
 async function getEuroleagueFeedFallback(error) {
   const games = await fetchSeasonGamesFromFeed(DEFAULT_SEASON_CODE);
-  const rounds = [...new Set(games.map(game => Number(game.round)).filter(Number.isFinite))].sort((a, b) => a - b);
+  const rounds = await fetchRoundsFromFeed(DEFAULT_SEASON_CODE).catch(() => {
+    return [...new Set(games.map(game => Number(game.round)).filter(Number.isFinite))].sort((a, b) => a - b);
+  });
 
   return {
     source: 'feed-fallback',
@@ -311,28 +323,24 @@ async function getEuroleagueFeedFallback(error) {
 
 async function getEuroleagueLiveData() {
   try {
-    const [standingsHtml, gameCenterHtml] = await Promise.all([
-      fetchText(`${EUROLEAGUE_SITE}/euroleague/standings/`),
-      fetchText(`${EUROLEAGUE_SITE}/euroleague/game-center/`)
+    const [games, rounds] = await Promise.all([
+      fetchSeasonGamesFromFeed(DEFAULT_SEASON_CODE),
+      fetchRoundsFromFeed(DEFAULT_SEASON_CODE)
     ]);
-    const standingsData = parseNextData(standingsHtml, 'standings');
-    const gameCenterData = parseNextData(gameCenterHtml, 'game-center');
-    const standingsProps = extractPageProps(standingsData);
-    const gameCenterProps = extractPageProps(gameCenterData);
-    const games = Array.isArray(gameCenterProps.games) ? gameCenterProps.games.map(normalizeGame) : [];
-    const standingsGroups = Array.isArray(standingsProps.statsData?.[0]?.groups)
-      ? standingsProps.statsData[0].groups
-      : [];
+    const currentRound = deriveCurrentRound(games);
+    const { standingsStats, teamStandingsTable } = await fetchStandingsFromFeed(currentRound, DEFAULT_SEASON_CODE).catch(() => {
+      return { standingsStats: [], teamStandingsTable: {} };
+    });
 
     return {
       source: 'live',
-      buildId: gameCenterData?.buildId ?? standingsData?.buildId ?? null,
-      currentRound: gameCenterProps.currentRound ?? null,
-      maxRound: gameCenterProps.maxRound ?? null,
-      currentSeasonCode: gameCenterProps.currentSeasonCode ?? null,
-      allAvailableRounds: gameCenterProps.allAvailableRounds ?? [],
-      teamStandingsTable: gameCenterProps.teamStandingsTable ?? {},
-      standingsStats: standingsGroups.map(normalizeStandingsRow).filter(Boolean),
+      buildId: null,
+      currentRound,
+      maxRound: rounds.length ? rounds[rounds.length - 1] : null,
+      currentSeasonCode: DEFAULT_SEASON_CODE,
+      allAvailableRounds: rounds,
+      teamStandingsTable,
+      standingsStats,
       games,
       fetchedAt: Date.now()
     };
