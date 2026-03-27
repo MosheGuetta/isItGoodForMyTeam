@@ -10,7 +10,8 @@ const usersFile = path.join(root, 'users.json');
 const EUROLEAGUE_FEED_BASE = 'https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E';
 const DEFAULT_SEASON_CODE = 'E2025';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
-const LIVE_CACHE_TTL_MS = 1000 * 60 * 5;
+const LIVE_CACHE_IDLE_MS = 1000 * 60 * 3;
+const LIVE_CACHE_LIVE_MS = 1000 * 30;
 const TEAM_TLA_MAP = {
   BAR: 'BAR',
   BAY: 'MUN',
@@ -179,6 +180,8 @@ function normalizeGame(game) {
     live: ['playing', 'live', 'in_progress', 'in progress'].includes(status),
     minute: game.minute ?? null,
     quarter: game.quarter ?? null,
+    quarterMinute: game.quarterMinute ?? game.remainingTime ?? null,
+    remainingTime: game.remainingTime ?? null,
     home: {
       code: mapTeamCode(home.code ?? home.clubCode ?? home.tlaCode ?? home.tla ?? game.homeTeamCode ?? ''),
       score: Number(home.score ?? game.homeScore ?? 0)
@@ -292,6 +295,11 @@ function deriveCurrentRound(games) {
   return rounds[rounds.length - 1];
 }
 
+function getLiveCacheTtlMs(payload) {
+  const hasLiveGame = Array.isArray(payload?.games) && payload.games.some(game => game.live);
+  return hasLiveGame ? LIVE_CACHE_LIVE_MS : LIVE_CACHE_IDLE_MS;
+}
+
 async function getEuroleagueFeedFallback(error) {
   const games = await fetchSeasonGamesFromFeed(DEFAULT_SEASON_CODE);
   const rounds = await fetchRoundsFromFeed(DEFAULT_SEASON_CODE).catch(() => {
@@ -301,6 +309,8 @@ async function getEuroleagueFeedFallback(error) {
   return {
     source: 'feed-fallback',
     fallbackReason: error?.message || null,
+    anyLive: games.some(game => game.live),
+    cacheTtlMs: getLiveCacheTtlMs({ games }),
     buildId: null,
     currentRound: deriveCurrentRound(games),
     maxRound: rounds.length ? rounds[rounds.length - 1] : null,
@@ -326,6 +336,8 @@ async function getEuroleagueLiveData() {
 
     return {
       source: 'live',
+      anyLive: games.some(game => game.live),
+      cacheTtlMs: getLiveCacheTtlMs({ games }),
       buildId: null,
       currentRound,
       maxRound: rounds.length ? rounds[rounds.length - 1] : null,
@@ -354,7 +366,7 @@ async function getCachedEuroleagueLiveData() {
   liveDataCache.promise = getEuroleagueLiveData()
     .then(payload => {
       liveDataCache.payload = payload;
-      liveDataCache.expiresAt = Date.now() + LIVE_CACHE_TTL_MS;
+      liveDataCache.expiresAt = Date.now() + getLiveCacheTtlMs(payload);
       return payload;
     })
     .finally(() => {

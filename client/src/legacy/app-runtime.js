@@ -5,6 +5,7 @@ const STATS_DATA = window.__STATS__;
 const META_DATA  = window.__META__;
 const MEDALS = ['1.','2.','3.','4.','5.'];
 const LIVE_POLL_INTERVAL_MS = 3 * 60 * 1000;
+const LIVE_POLL_INTERVAL_LIVE_MS = 30 * 1000;
 // Keep the bundled snapshot aligned with the known official order when live data is unavailable.
 const SNAPSHOT_STANDINGS_OVERRIDES = {
   ULK: 1,
@@ -46,6 +47,10 @@ const APP = {
   liveMeta: null,
   authBusy: false
 };
+
+function getLivePollInterval() {
+  return APP.liveMeta?.anyLive ? LIVE_POLL_INTERVAL_LIVE_MS : LIVE_POLL_INTERVAL_MS;
+}
 
 let hasInitialized = false;
 
@@ -517,7 +522,9 @@ async function loadLiveData() {
       allAvailableRounds: Array.isArray(live.allAvailableRounds) ? live.allAvailableRounds : [],
       currentSeasonCode: live.currentSeasonCode || null,
       source: live.source || 'live',
-      fetchedAt: live.fetchedAt || null
+      fetchedAt: live.fetchedAt || null,
+      anyLive: Boolean(live.anyLive ?? live.games.some(game => game.live)),
+      cacheTtlMs: Number(live.cacheTtlMs) || LIVE_POLL_INTERVAL_MS
     };
   } catch (_) {
     APP.officialStandingsStats = null;
@@ -628,6 +635,8 @@ function normalizeGames(games) {
     status: g.status ?? null,
     minute: g.minute ?? null,
     quarter: g.quarter ?? null,
+    quarterMinute: g.quarterMinute ?? g.remainingTime ?? null,
+    remainingTime: g.remainingTime ?? null,
     home: {
       code: g.home?.code ?? g.home?.clubCode ?? g.home?.tlaCode ?? g.homeTeam?.code ?? g.homeTeam?.tla ?? '',
       score: Number(g.home?.score ?? g.homeScore ?? g.homePoints ?? 0)
@@ -1297,6 +1306,38 @@ function getLiveGameWindow(daysAhead = 3) {
   return { live, recentResults, upcoming };
 }
 
+function formatLiveClock(game) {
+  const quarter = Number(game?.quarter);
+  const label = Number.isFinite(quarter) && quarter > 0
+    ? (quarter <= 4 ? `Q${quarter}` : `OT${quarter - 4}`)
+    : '';
+  const clock = game?.quarterMinute || game?.remainingTime || game?.minute || '';
+  return [label, clock].filter(Boolean).join(' · ');
+}
+
+function getWantedResultLabel(game) {
+  if (!APP.selectedTeam || !APP.selectedGoal) return '';
+  const myTeam = getTeam(APP.selectedTeam);
+  if (!myTeam) return '';
+  const goalRank = APP.selectedGoal === 'playoffs' ? 6 : 10;
+  const goalLabel = APP.selectedGoal === 'playoffs' ? 'Playoffs (Top 6)' : 'Play-In (Top 10)';
+  const analysis = analyzeGameForTeam(game, myTeam, goalRank, goalLabel);
+
+  if (analysis.type === 'myteam') {
+    return `Wanted: ${displayTeamName(APP.selectedTeam)} win`;
+  }
+
+  if (analysis.preferredWinnerCode) {
+    return `Wanted: ${displayTeamName(analysis.preferredWinnerCode)} win`;
+  }
+
+  if (analysis.threatenedCode) {
+    return `Wanted: ${displayTeamName(analysis.threatenedCode)} lose`;
+  }
+
+  return 'Wanted: Low impact';
+}
+
 function renderLiveResults() {
   const el = document.getElementById('live-results-content');
   if (!el) return;
@@ -1307,8 +1348,11 @@ function renderLiveResults() {
 
   function renderBadge(game) {
     if (game.live) {
-      const detail = [game.quarter, game.minute].filter(Boolean).join(' ');
-      return `<span class="live-badge">LIVE${detail ? ` ${detail}` : ''}</span>`;
+      const clock = formatLiveClock(game);
+      return `
+        <span class="live-badge live-badge--pulsing">LIVE</span>
+        ${clock ? `<span class="live-clock">${clock}</span>` : ''}
+      `;
     }
     if (game.played) return '<span class="final-badge">FINAL</span>';
     if (!game.date) return '<span class="upcoming-badge">TBD</span>';
@@ -1320,6 +1364,8 @@ function renderLiveResults() {
     const homeClub = clubOf(game.home.code);
     const awayClub = clubOf(game.away.code);
     const isMine = selectedCode && (game.home.code === selectedCode || game.away.code === selectedCode);
+    const clock = game.live ? formatLiveClock(game) : '';
+    const wantedLabel = getWantedResultLabel(game);
     const scoreMarkup = game.live || game.played
       ? `<span class="live-score">${game.home.score} - ${game.away.score}</span>`
       : '<span class="live-score live-score--tbd">vs</span>';
@@ -1327,7 +1373,11 @@ function renderLiveResults() {
       <div class="live-game-header">${renderBadge(game)}</div>
       <div class="live-game-body">
         <div class="live-team">${renderLogoMarkup(homeClub, 'sm')}<span>${homeClub.abbr || game.home.code}</span></div>
-        ${scoreMarkup}
+        <div class="live-score-stack">
+          ${scoreMarkup}
+          ${clock ? `<div class="live-game-clock">${clock}</div>` : ''}
+          ${wantedLabel ? `<div class="wanted-result-label">${wantedLabel}</div>` : ''}
+        </div>
         <div class="live-team">${renderLogoMarkup(awayClub, 'sm')}<span>${awayClub.abbr || game.away.code}</span></div>
       </div>
     </article>`;
@@ -1369,10 +1419,15 @@ async function refreshLiveViews() {
 }
 
 function startLivePolling() {
-  window.clearInterval(window.__igtmtLivePollTimer);
-  window.__igtmtLivePollTimer = window.setInterval(() => {
-    refreshLiveViews().catch(error => console.warn('Auto-refresh error:', error));
-  }, LIVE_POLL_INTERVAL_MS);
+  window.clearTimeout(window.__igtmtLivePollTimer);
+  const scheduleNextRefresh = () => {
+    window.__igtmtLivePollTimer = window.setTimeout(() => {
+      refreshLiveViews()
+        .catch(error => console.warn('Auto-refresh error:', error))
+        .finally(scheduleNextRefresh);
+    }, getLivePollInterval());
+  };
+  scheduleNextRefresh();
 }
 
 window.switchTab = switchTab;

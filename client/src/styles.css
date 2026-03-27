@@ -212,6 +212,30 @@ body{
   letter-spacing:.05em;
   animation:livePulse 1.4s ease-in-out infinite;
 }
+.live-badge--pulsing{
+  position:relative;
+  padding-left:18px;
+}
+.live-badge--pulsing::before{
+  content:'';
+  position:absolute;
+  left:8px;
+  top:50%;
+  width:7px;
+  height:7px;
+  border-radius:999px;
+  background:#fff;
+  transform:translateY(-50%);
+  animation:liveDotPulse 1.2s ease-in-out infinite;
+}
+.live-clock{
+  display:inline-block;
+  margin-left:8px;
+  color:#f7a34b;
+  font-size:.76rem;
+  font-weight:800;
+  letter-spacing:.04em;
+}
 .final-badge{
   display:inline-flex;
   align-items:center;
@@ -278,6 +302,12 @@ body{
   align-items:center;
   gap:10px;
 }
+.live-score-stack{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+}
 .live-team{
   display:flex;
   flex-direction:column;
@@ -299,6 +329,34 @@ body{
   font-size:.92rem;
   font-weight:800;
 }
+.live-game-clock{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:24px;
+  padding:4px 10px;
+  border-radius:999px;
+  background:rgba(247,163,75,.14);
+  color:#f7a34b;
+  font-size:.74rem;
+  font-weight:800;
+  letter-spacing:.05em;
+  white-space:nowrap;
+}
+.wanted-result-label{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  max-width:180px;
+  padding:4px 10px;
+  border-radius:999px;
+  background:rgba(96,165,250,.14);
+  color:#9ec5ff;
+  font-size:.7rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-align:center;
+}
 .no-results{
   padding:28px 16px;
   border-radius:16px;
@@ -310,6 +368,10 @@ body{
 @keyframes livePulse{
   0%,100%{opacity:1}
   50%{opacity:.62}
+}
+@keyframes liveDotPulse{
+  0%,100%{opacity:1;transform:translateY(-50%) scale(1)}
+  50%{opacity:.35;transform:translateY(-50%) scale(1.35)}
 }
 .analysis-chip{
   display:inline-flex;

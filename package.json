@@ -9,6 +9,7 @@
     "dev:server": "node server/server.js",
     "dev:client": "npm --prefix client run dev",
     "build:client": "npm --prefix client run build",
+    "check:live": "node scripts/check-live-data.js",
     "mobile:sync": "npm --prefix client run sync",
     "mobile:android": "npm --prefix client run android",
     "mobile:ios": "npm --prefix client run ios"
