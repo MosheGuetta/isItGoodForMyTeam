@@ -549,6 +549,20 @@ function displayTeamName(c) { return teamLabel(c); }
 function competitionRoundLabel() { return isNBA() ? 'Week' : 'Round'; }
 function getTeamRecordParts(code) {
   const normalizedCode = normalizeTeamCode(code);
+  if (isNBA()) {
+    const team = APP.nbaAllStandings.find(item => item.code === normalizedCode) || null;
+    if (team && Number.isFinite(team.w) && Number.isFinite(team.l)) {
+      return { w: team.w, l: team.l };
+    }
+
+    const calculated = calcNBAConferenceStandings(APP.nbaGames || []).find(item => item.code === normalizedCode) || null;
+    if (calculated && Number.isFinite(calculated.w) && Number.isFinite(calculated.l)) {
+      return { w: calculated.w, l: calculated.l };
+    }
+
+    return { w: 0, l: 0 };
+  }
+
   const team = getTeam(normalizedCode) || APP.officialStandingsStats?.find(item => item.code === normalizedCode) || null;
   if (team && Number.isFinite(team.w) && Number.isFinite(team.l)) {
     return { w: team.w, l: team.l };
@@ -800,12 +814,13 @@ async function loadNBALiveData() {
     if (!res.ok) throw new Error('bad response');
     const live = await res.json();
     if (!live || live.error) throw new Error(live?.error || 'no data');
-    const liveHasValidCodes = Array.isArray(live.standingsStats)
-      && live.standingsStats.length > 0
-      && live.standingsStats.some(team => team.code);
+    const normalizedLiveStandings = Array.isArray(live.standingsStats)
+      ? live.standingsStats.filter(team => team?.code && NBA_CLUBS[team.code])
+      : [];
+    const liveHasValidCodes = new Set(normalizedLiveStandings.map(team => team.code)).size >= 20;
     let standings;
     if (liveHasValidCodes) {
-      standings = live.standingsStats;
+      standings = normalizedLiveStandings;
     } else if (Array.isArray(live.games) && live.games.length) {
       const nbaCodes = new Set(Object.keys(NBA_CLUBS));
       const recs = {};
@@ -1444,11 +1459,17 @@ function runAnalysis() {
   const tc = APP.selectedTeam, goal = APP.selectedGoal;
   const goalRank = goal === 'playoffs' ? 6 : 10;
   const goalLabel = goal === 'playoffs' ? 'Playoffs (Top 6)' : 'Play-In (Top 10)';
-  const myTeam = getTeam(tc); if (!myTeam) return;
+  const result = document.getElementById('analysis-result');
+  const myTeam = getTeam(tc);
+  if (!myTeam) {
+    if (result) {
+      result.innerHTML = `<div class="no-selection">${isNBA() ? 'NBA' : 'EuroLeague'} data is still loading for ${displayTeamName(tc)}. Try refreshing once the standings finish loading.</div>`;
+    }
+    return;
+  }
   const myClub = clubOf(tc);
   const myGames = getActiveGames().filter(g => g.home.code===tc || g.away.code===tc);
   const { focusRound, roundState } = getRoundContext();
-  const result = document.getElementById('analysis-result');
   if (!myGames.find(g => !g.played)) {
     const msg = myTeam.rank<=6 ? 'Made Playoffs!' : myTeam.rank<=10 ? 'Made Play-In!' : 'Did not qualify';
     result.innerHTML = `<div class="no-selection">Season complete! Final rank: <strong style="color:#f7b731">#${myTeam.rank}</strong><br>${msg}</div>`;
@@ -2170,6 +2191,13 @@ function renderScenarios() {
   }
 
   const { importantGames, totalScenarios, buckets } = enumerateScenarioBuckets(myTeam, goalRank, goalLabel, remainingRounds);
+  if (!importantGames.length) {
+    el.innerHTML = `<div class="scenario-empty">
+      <div class="section-title" style="margin-bottom:10px">Scenarios</div>
+      <div class="summary-lede">There are no swing games to model yet for ${displayTeamName(APP.selectedTeam)}. Once more future ${competitionRoundLabel().toLowerCase()}s are available, the scenario paths will appear here.</div>
+    </div>`;
+    return;
+  }
   const cards = buckets.map(bucket => {
     const percent = bucket.count > 0 ? `${((bucket.count / totalScenarios) * 100).toFixed(1)}%` : bucket.options.size ? '<0.1%' : '0.0%';
     const options = [...bucket.options.values()]

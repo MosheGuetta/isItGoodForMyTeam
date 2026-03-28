@@ -356,6 +356,38 @@ const NBA_CDN_BASE = 'https://cdn.nba.com/static/json';
 const NBA_STATS_BASE = 'https://stats.nba.com/stats';
 const NBA_SEASON = '2025-26';
 const NBA_SEASON_START = '2025-10-22';
+const NBA_TEAM_ID_TO_CODE = {
+  1610612737: 'ATL',
+  1610612738: 'BOS',
+  1610612751: 'BKN',
+  1610612766: 'CHA',
+  1610612741: 'CHI',
+  1610612739: 'CLE',
+  1610612742: 'DAL',
+  1610612743: 'DEN',
+  1610612765: 'DET',
+  1610612744: 'GSW',
+  1610612745: 'HOU',
+  1610612754: 'IND',
+  1610612746: 'LAC',
+  1610612747: 'LAL',
+  1610612763: 'MEM',
+  1610612748: 'MIA',
+  1610612749: 'MIL',
+  1610612750: 'MIN',
+  1610612740: 'NOP',
+  1610612752: 'NYK',
+  1610612760: 'OKC',
+  1610612753: 'ORL',
+  1610612755: 'PHI',
+  1610612756: 'PHX',
+  1610612757: 'POR',
+  1610612758: 'SAC',
+  1610612759: 'SAS',
+  1610612761: 'TOR',
+  1610612762: 'UTA',
+  1610612764: 'WAS'
+};
 const NBA_REQ_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
@@ -384,7 +416,8 @@ async function fetchNbaStandings() {
   const idx = n => H.indexOf(n);
   const rows = rs.rowSet || [];
   const standingsStats = rows.map((row, i) => {
-    const abbr = row[idx('TeamAbbreviation')] || '';
+    const teamId = Number(row[idx('TeamID')] || 0);
+    const abbr = NBA_TEAM_ID_TO_CODE[teamId] || '';
     const wins = Number(row[idx('WINS')] || 0);
     const losses = Number(row[idx('LOSSES')] || 0);
     const homeRec = String(row[idx('HOME')] || '0-0').split('-');
@@ -406,7 +439,9 @@ async function fetchNbaStandings() {
     };
   });
   const teamStandingsTable = {};
-  standingsStats.forEach(t => { teamStandingsTable[t.code] = t.rank; });
+  standingsStats
+    .filter(t => t.code)
+    .forEach(t => { teamStandingsTable[t.code] = t.rank; });
   return { standingsStats, teamStandingsTable };
 }
 
