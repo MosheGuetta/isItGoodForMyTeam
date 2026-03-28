@@ -248,6 +248,7 @@ function setAuthMode(mode) {
   document.getElementById('registerModeBtn')?.classList.toggle('active', mode === 'register');
   const note = document.getElementById('authModeCopy');
   const nameField = document.getElementById('authName');
+  const forgotRow = document.getElementById('forgotRow');
   if (note) {
     note.textContent = mode === 'login'
       ? 'Welcome back. Log in to keep your saved team context across devices later.'
@@ -256,7 +257,67 @@ function setAuthMode(mode) {
   if (nameField) {
     nameField.parentElement.style.display = mode === 'register' ? 'block' : 'none';
   }
+  if (forgotRow) {
+    forgotRow.style.display = mode === 'login' ? 'flex' : 'none';
+  }
   renderAuthState('');
+}
+
+function togglePasswordVisibility() {
+  const input = document.getElementById('authPassword');
+  const showIcon = document.getElementById('eyeIconShow');
+  const hideIcon = document.getElementById('eyeIconHide');
+  if (!input) return;
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  if (showIcon) showIcon.style.display = isHidden ? 'none' : '';
+  if (hideIcon) hideIcon.style.display = isHidden ? '' : 'none';
+}
+
+function openForgotPassword() {
+  const modal = document.getElementById('forgotPasswordModal');
+  const emailInput = document.getElementById('forgotEmail');
+  const errorEl = document.getElementById('forgotError');
+  const successEl = document.getElementById('forgotSuccess');
+  const submitLabel = document.getElementById('forgotSubmitLabel');
+  const submitBtn = document.getElementById('forgotSubmitBtn');
+  if (modal) { modal.setAttribute('aria-hidden', 'false'); modal.style.display = 'flex'; }
+  if (emailInput) emailInput.value = document.getElementById('authEmail')?.value || '';
+  if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+  if (successEl) { successEl.style.display = 'none'; successEl.textContent = ''; }
+  if (submitLabel) submitLabel.textContent = 'Send Reset Link';
+  if (submitBtn) submitBtn.disabled = false;
+}
+
+function closeForgotPassword() {
+  const modal = document.getElementById('forgotPasswordModal');
+  if (modal) { modal.setAttribute('aria-hidden', 'true'); modal.style.display = ''; }
+}
+
+async function submitForgotPassword() {
+  const emailInput = document.getElementById('forgotEmail');
+  const errorEl = document.getElementById('forgotError');
+  const successEl = document.getElementById('forgotSuccess');
+  const submitLabel = document.getElementById('forgotSubmitLabel');
+  const submitBtn = document.getElementById('forgotSubmitBtn');
+  const email = emailInput?.value.trim();
+  if (!email) {
+    if (errorEl) { errorEl.textContent = 'Please enter your email address.'; errorEl.style.display = 'block'; }
+    return;
+  }
+  if (submitLabel) submitLabel.textContent = 'Sending...';
+  if (submitBtn) submitBtn.disabled = true;
+  if (errorEl) { errorEl.style.display = 'none'; }
+  if (successEl) { successEl.style.display = 'none'; }
+  try {
+    await apiRequest('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+    if (successEl) { successEl.textContent = 'If that email is registered, a reset link has been sent. Check your inbox.'; successEl.style.display = 'block'; }
+    if (submitLabel) submitLabel.textContent = 'Sent!';
+  } catch (err) {
+    if (errorEl) { errorEl.textContent = err.message || 'Something went wrong. Try again.'; errorEl.style.display = 'block'; }
+    if (submitLabel) submitLabel.textContent = 'Send Reset Link';
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 async function apiRequest(url, options = {}) {
