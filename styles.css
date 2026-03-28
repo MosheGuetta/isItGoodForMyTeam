@@ -34,10 +34,10 @@ body{
 }
 .hdr-top{
   display:flex;
-  align-items:flex-start;
+  align-items:flex-end;
   justify-content:space-between;
   gap:10px;
-  padding:10px 16px 8px;
+  padding:10px 16px 4px;
 }
 .header-brand{display:flex;align-items:center;gap:10px;min-width:0}
 .app-ball{font-size:1.28rem;flex-shrink:0}
@@ -48,7 +48,8 @@ body{
   gap:5px;
   flex-shrink:0;
   align-items:center;
-  margin-top:20px;
+  margin-top:0;
+  padding-bottom:2px;
 }
 .hdr-btn{
   display:inline-flex;
@@ -951,6 +952,6 @@ body{
   .scenario-bucket-head{flex-direction:column}
   .scenario-placement{align-items:flex-start;min-width:0}
   .hdr-btn{font-size:.64rem;height:24px;padding:0 7px}
-  .header-btns{margin-top:14px}
+  .header-btns{padding-bottom:0}
   .app-subtitle{max-width:160px}
 }
