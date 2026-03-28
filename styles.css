@@ -48,8 +48,9 @@ body{
   gap:5px;
   flex-shrink:0;
   align-items:center;
-  margin-top:0;
-  padding-bottom:2px;
+  align-self:flex-end;
+  transform:translateY(calc(24px + 1.5mm));
+  padding-bottom:0;
 }
 .hdr-btn{
   display:inline-flex;
@@ -952,6 +953,6 @@ body{
   .scenario-bucket-head{flex-direction:column}
   .scenario-placement{align-items:flex-start;min-width:0}
   .hdr-btn{font-size:.64rem;height:24px;padding:0 7px}
-  .header-btns{padding-bottom:0}
+  .header-btns{transform:translateY(calc(18px + 1.5mm))}
   .app-subtitle{max-width:160px}
 }
