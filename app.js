@@ -90,7 +90,10 @@ const APP = {
   nbaLiveMeta: null,
   authBusy: false,
   currentTab: 'analysis',
-  setupReturnScreen: null
+  setupReturnScreen: null,
+  scenarioCacheKey: null,
+  scenarioCacheHtml: '',
+  scenarioRenderQueued: false
 };
 
 const TEAM_CODE_ALIASES = {
@@ -108,6 +111,61 @@ function isNBA() { return APP.selectedCompetition === 'nba'; }
 function getActiveGames() { return isNBA() ? APP.nbaGames : APP.allGames; }
 
 function getActiveLiveMeta() { return isNBA() ? APP.nbaLiveMeta : APP.liveMeta; }
+
+function clearGoalSelectionUI() {
+  document.querySelectorAll('.goal-btn').forEach(btn => btn.classList.remove('selected'));
+}
+
+function syncGoalSelectionUI() {
+  clearGoalSelectionUI();
+  if (APP.selectedGoal) {
+    document.querySelector(`.goal-btn.${APP.selectedGoal}`)?.classList.add('selected');
+  }
+}
+
+function invalidateScenarioCache() {
+  APP.scenarioCacheKey = null;
+  APP.scenarioCacheHtml = '';
+  APP.scenarioRenderQueued = false;
+}
+
+function setScenarioLoadingState() {
+  const el = document.getElementById('scenarios-content');
+  if (el) el.innerHTML = '<div class="loading-msg">Loading scenarios…</div>';
+}
+
+function getScenarioCacheKey() {
+  const games = getActiveGames();
+  const standings = APP.standings || [];
+  const gamesFingerprint = `${games.length}:${games.filter(game => !game.played).length}:${games.filter(game => game.live).length}`;
+  const standingsFingerprint = standings.map(team => `${team.code}:${team.rank}:${team.w}:${team.l}`).join('|');
+  return [
+    APP.selectedCompetition || '',
+    APP.selectedTeam || '',
+    APP.selectedGoal || '',
+    APP.currentTab || '',
+    gamesFingerprint,
+    standingsFingerprint
+  ].join('::');
+}
+
+function scheduleScenarioRender() {
+  if (APP.currentTab !== 'scenarios') return;
+  const cacheKey = getScenarioCacheKey();
+  const el = document.getElementById('scenarios-content');
+  if (!el) return;
+  if (APP.scenarioCacheKey === cacheKey && APP.scenarioCacheHtml) {
+    el.innerHTML = APP.scenarioCacheHtml;
+    return;
+  }
+  if (APP.scenarioRenderQueued) return;
+  APP.scenarioRenderQueued = true;
+  setScenarioLoadingState();
+  window.setTimeout(() => {
+    APP.scenarioRenderQueued = false;
+    renderScenarios();
+  }, 0);
+}
 
 // Rebuild APP.standings for NBA mode (conference-filtered, rank = confRank)
 function rebuildNBAActiveStandings() {
@@ -163,7 +221,7 @@ function switchTab(name) {
   if (name === 'schedule') renderSchedule();
   if (name === 'players') renderPlayers();
   if (name === 'live') renderLiveResults();
-  if (name === 'scenarios') renderScenarios();
+  if (name === 'scenarios') scheduleScenarioRender();
 }
 
 function renderScreen() {
@@ -349,16 +407,16 @@ function applyUserPreferences(user) {
   APP.selectedCompetition = preferences?.competition || null;
   APP.selectedTeam = normalizeTeamCode(preferences?.team || null) || null;
   APP.selectedGoal = preferences?.goal || null;
+  invalidateScenarioCache();
   if (isNBA()) {
     rebuildNBAActiveStandings();
     updateGoalSubtext();
   }
   renderTeamGrid();
-  document.querySelectorAll('.goal-btn').forEach(btn => btn.classList.remove('selected'));
-  if (APP.selectedGoal) document.querySelector(`.goal-btn.${APP.selectedGoal}`)?.classList.add('selected');
+  syncGoalSelectionUI();
   renderAnalysisSummary();
   updateHeaderStatus();
-  renderScenarios();
+  scheduleScenarioRender();
 }
 
 async function restoreSession() {
@@ -385,7 +443,7 @@ async function restoreSession() {
     renderStandings();
     renderSchedule();
     renderPlayers();
-    try { renderScenarios(); } catch (e) { console.error('renderScenarios error:', e); }
+    try { scheduleScenarioRender(); } catch (e) { console.error('renderScenarios error:', e); }
     runAnalysis();
   } else if (sessionUser) {
     // Logged in but no preferences saved — go to competition picker
@@ -440,7 +498,7 @@ async function submitAuth() {
     renderStandings();
     renderSchedule();
     renderPlayers();
-    try { renderScenarios(); } catch (e) { console.error('renderScenarios error:', e); }
+    try { scheduleScenarioRender(); } catch (e) { console.error('renderScenarios error:', e); }
     runAnalysis();
   } else {
     APP.currentScreen = 'competition';
@@ -472,8 +530,6 @@ async function completeSetup() {
   renderStandings();
   renderSchedule();
   renderPlayers();
-  // Wrap renderScenarios so any unexpected error doesn't block runAnalysis.
-  try { renderScenarios(); } catch (e) { console.error('renderScenarios error:', e); }
   switchTab('analysis');
   runAnalysis();
 }
@@ -487,8 +543,10 @@ function goToCompetitionSelect() {
   APP.selectedTeam = null;
   APP.selectedGoal = null;
   APP.selectedCompetition = null;
+  invalidateScenarioCache();
   APP.currentScreen = 'competition';
   clearAppPanels();
+  clearGoalSelectionUI();
   renderTeamGrid();
   renderScreen();
 }
@@ -499,9 +557,7 @@ function goToSetupFromApp() {
   renderScreen();
   renderTeamGrid();
   updateGoalSubtext();
-  // Re-highlight the currently saved goal button
-  document.querySelectorAll('.goal-btn').forEach(b => b.classList.remove('selected'));
-  if (APP.selectedGoal) document.querySelector('.goal-btn.' + APP.selectedGoal)?.classList.add('selected');
+  syncGoalSelectionUI();
 }
 
 function goToSetupBack() {
@@ -546,7 +602,9 @@ async function selectCompetition(comp) {
   APP.selectedCompetition = comp;
   APP.selectedTeam = null;
   APP.selectedGoal = null;
+  invalidateScenarioCache();
   clearAppPanels();
+  clearGoalSelectionUI();
   // Highlight selected card
   document.querySelectorAll('.competition-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('comp-' + comp)?.classList.add('selected');
@@ -586,8 +644,10 @@ async function logout() {
   APP.selectedTeam = null;
   APP.selectedGoal = null;
   APP.selectedCompetition = null;
+  invalidateScenarioCache();
   APP.currentScreen = 'auth';
   clearAppPanels();
+  clearGoalSelectionUI();
   renderTeamGrid();
   renderScreen();
   setAuthMode('login');
@@ -1273,17 +1333,17 @@ function selectTeam(code, e) {
   APP.selectedTeam = normalizeTeamCode(code);
   // For NBA: rebuild conference standings to match selected team's conf
   if (isNBA()) rebuildNBAActiveStandings();
+  invalidateScenarioCache();
   document.querySelectorAll('.team-card').forEach(c => c.classList.remove('selected'));
   if (e && e.currentTarget) e.currentTarget.classList.add('selected');
   updateHeaderStatus();
   renderAnalysisSummary();
-  renderScenarios();
 }
 
 function selectGoal(g) {
   APP.selectedGoal = g;
-  document.querySelectorAll('.goal-btn').forEach(b => b.classList.remove('selected'));
-  document.querySelector('.goal-btn.'+g).classList.add('selected');
+  invalidateScenarioCache();
+  syncGoalSelectionUI();
   updateHeaderStatus();
   renderAnalysisSummary();
 }
@@ -2242,9 +2302,19 @@ function enumerateScenarioBuckets(myTeam, goalRank, goalLabel, remainingRounds) 
 function renderScenarios() {
   const el = document.getElementById('scenarios-content');
   if (!el) return;
+  const cacheKey = getScenarioCacheKey();
+  if (APP.scenarioCacheKey === cacheKey && APP.scenarioCacheHtml) {
+    el.innerHTML = APP.scenarioCacheHtml;
+    return;
+  }
 
   if (!APP.selectedTeam) {
     el.innerHTML = '<div class="no-selection">Select a team to view its scenario paths.</div>';
+    return;
+  }
+
+  if (!APP.selectedGoal) {
+    el.innerHTML = '<div class="no-selection">Select a goal to view its scenario paths.</div>';
     return;
   }
 
@@ -2304,11 +2374,14 @@ function renderScenarios() {
     ? `${displayTeamName(APP.selectedTeam)} ${myTeam.conference || ''} Conference scenarios`
     : `${displayTeamName(APP.selectedTeam)} scenarios`;
 
-  el.innerHTML = `<section class="scenario-intro">
+  const html = `<section class="scenario-intro">
     <div class="section-title" style="margin-bottom:8px">${conferenceLabel} after ${phaseLabel} ${remainingRounds[0] - 1}</div>
     <div class="summary-lede">The app is using ${phaseLabel.toLowerCase()}s ${phaseList} and enumerating ${importantGames.length} important games. The percentages show the share of modeled important-game combinations that land in each outcome, not real-world betting odds or exact qualification probability. Other remaining games are filled with a simple baseline result.</div>
   </section>
   <div class="scenario-stack">${cards}</div>`;
+  APP.scenarioCacheKey = cacheKey;
+  APP.scenarioCacheHtml = html;
+  el.innerHTML = html;
 }
 
 function clearAppPanels() {
@@ -2452,10 +2525,11 @@ async function refreshLiveViews() {
     const calculatedStandings = calcStandings(APP.allGames, APP.officialStandingsTable);
     APP.standings = mergeStandings(calculatedStandings, APP.officialStandingsStats);
   }
+  invalidateScenarioCache();
   renderStandings();
   renderSchedule();
   renderLiveResults();
-  renderScenarios();
+  scheduleScenarioRender();
   if (APP.selectedTeam) runAnalysis();
 }
 

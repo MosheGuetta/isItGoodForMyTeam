@@ -34,7 +34,7 @@ body{
 }
 .hdr-top{
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   justify-content:space-between;
   gap:10px;
   padding:10px 16px 8px;
@@ -43,7 +43,13 @@ body{
 .app-ball{font-size:1.28rem;flex-shrink:0}
 .app-title{font-size:1.55rem;font-weight:800;color:var(--accent);letter-spacing:-.02em;white-space:nowrap}
 .app-subtitle{margin-top:1px;font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
-.header-btns{display:flex;gap:5px;flex-shrink:0;align-items:center}
+.header-btns{
+  display:flex;
+  gap:5px;
+  flex-shrink:0;
+  align-items:center;
+  margin-top:20px;
+}
 .hdr-btn{
   display:inline-flex;
   align-items:center;
@@ -549,6 +555,8 @@ body{
 }
 .goal-btn small{display:block;margin-top:6px;font-size:.85rem;color:#cfd3e6;font-weight:700}
 .goal-btn:hover{transform:translateY(-1px)}
+.goal-btn:focus{outline:none}
+.goal-btn:focus-visible{box-shadow:0 0 0 2px rgba(255,138,29,.28)}
 .goal-btn.playoffs.selected{border-color:var(--accent);background:linear-gradient(180deg,rgba(58,39,28,.92),rgba(42,28,22,.96))}
 .goal-btn.playin.selected{border-color:#4da2d9;background:linear-gradient(180deg,rgba(19,43,60,.96),rgba(16,29,44,.96))}
 .position-card,.game-card,.player-card,.leader-card,.game-row,.no-selection,.error-msg{
@@ -943,5 +951,6 @@ body{
   .scenario-bucket-head{flex-direction:column}
   .scenario-placement{align-items:flex-start;min-width:0}
   .hdr-btn{font-size:.64rem;height:24px;padding:0 7px}
+  .header-btns{margin-top:14px}
   .app-subtitle{max-width:160px}
 }
