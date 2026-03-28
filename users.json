@@ -1,0 +1,44 @@
+{
+  "users": [
+    {
+      "id": "8dc7245f-902c-4ed7-967d-d08a5d3b1899",
+      "name": "Codex Test",
+      "email": "codex-test-1774463507696@example.com",
+      "passwordHash": "1744b32035f202d8bf1bfd0e5c97a20b:d165a288ef20d05131ce76b553cbe98bf4d133f24e25dade4e9d1dda04d6aab880bdb264389c0cc18cf7377289eabec4a602af8135265aeada3ce012ed756786",
+      "preferences": {
+        "team": "TEL",
+        "goal": "playin"
+      },
+      "createdAt": "2026-03-25T18:31:47.946Z",
+      "session": null
+    },
+    {
+      "id": "f139437f-ce32-42a4-b305-9a360ccaded2",
+      "name": "Moshe",
+      "email": "moshe8guetta@gmail.com",
+      "passwordHash": "270601fc1951b8ac2e77d7310666be19:cb28ec14fcd7a4f9aa5f36b4e65701a539b9ab936eddd656f82ea52c9ecbf040a1d0bfb057f5813be35d88bf312cdd5987fd0aa44f90a85bb272ebdc16ef9460",
+      "preferences": {
+        "competition": "nba",
+        "team": "POR",
+        "goal": "playin"
+      },
+      "createdAt": "2026-03-25T18:37:15.186Z",
+      "session": {
+        "token": "8b8aad182cb1d1c92e11ef534a60b1b8cefa76b30a08bbb9",
+        "expiresAt": 1777281628678
+      }
+    },
+    {
+      "id": "28cd8320-33e0-46e9-ba5b-cedc88cb64c6",
+      "name": "Veronica",
+      "email": "veronicacohenb@gmail.com",
+      "passwordHash": "bfb72ea2aa1f935592bdc0de06e1eb59:91dbe5f0fa75686a20ab5d5967179159401af2bdf6639013ba64f827c37aa7e9039aed883176e55b61c6f61aa6e2ce9a8dcc44a6bf3f2f5f640817580b447953",
+      "preferences": {
+        "team": "TEL",
+        "goal": "playin"
+      },
+      "createdAt": "2026-03-25T19:45:12.813Z",
+      "session": null
+    }
+  ]
+}

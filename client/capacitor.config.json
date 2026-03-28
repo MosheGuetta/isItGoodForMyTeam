@@ -1,0 +1,6 @@
+{
+  "appId": "com.isthatgoodformyteam.app",
+  "appName": "Is That Good For My Team",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

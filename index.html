@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -8,30 +8,38 @@
 </head>
 <body>
 <div class="app-header">
-  <div class="app-title-row">
-    <span class="app-ball">🏀</span>
-    <div>
-      <div class="app-title">Is It Good For My Team?</div>
-      <div class="app-subtitle" id="appSubtitle">EuroLeague 2025-26</div>
+  <div class="hdr-top">
+    <div class="header-brand">
+      <span class="app-ball">🏀</span>
+      <div>
+        <div class="app-title">Is It Good For My Team?</div>
+        <div class="app-subtitle" id="appSubtitle">Select Competition</div>
+      </div>
+    </div>
+    <div class="header-btns">
+      <button class="hdr-btn hdr-btn-accent" id="changeTeamBtn" onclick="goToSetupFromApp()" style="display:none">Team / Goal</button>
+      <button class="hdr-btn" id="changeCompBtn" onclick="goToCompetitionSelect()" style="display:none">League</button>
+      <button class="hdr-btn" id="logoutBtn" onclick="logout()" style="display:none">Log Out</button>
     </div>
   </div>
-  <div class="header-status" id="headerStatus"></div>
+  <div id="headerStatus" class="header-status"></div>
 </div>
 
 <main class="app-shell">
+
 <section class="screen active" id="screen-auth">
   <div class="auth-screen">
     <div class="auth-hero">
-      <div class="auth-kicker">Mobile-first onboarding</div>
+      <div class="auth-kicker">Your basketball companion</div>
       <h1>Start with your account.</h1>
-      <p>Use one clean login/register screen in mobile and web, then continue into your team setup.</p>
+      <p>Log in or register to track your team across EuroLeague and NBA.</p>
     </div>
     <div class="auth-card">
       <div class="auth-toggle">
         <button class="auth-mode-btn active" id="loginModeBtn" onclick="setAuthMode('login')">Log In</button>
         <button class="auth-mode-btn" id="registerModeBtn" onclick="setAuthMode('register')">Register</button>
       </div>
-      <div class="auth-fields">
+      <div class="auth-fields" id="nameFieldWrap">
         <label class="field-label" for="authName">Name</label>
         <input class="app-input" id="authName" type="text" placeholder="Moshe" />
       </div>
@@ -41,11 +49,40 @@
       </div>
       <div class="auth-fields">
         <label class="field-label" for="authPassword">Password</label>
-        <input class="app-input" id="authPassword" type="password" placeholder="••••••••" />
+        <input class="app-input" id="authPassword" type="password" placeholder="••••••" />
       </div>
-      <p class="auth-note" id="authModeCopy">Welcome back. Log in to keep your saved team context across devices later.</p>
       <div class="auth-error" id="authError"></div>
       <button class="primary-btn auth-submit" onclick="submitAuth()"><span id="authSubmitLabel">Continue</span></button>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="screen-competition">
+  <div class="setup-shell">
+    <div class="setup-intro">
+      <div class="auth-kicker">Step 1 of 3</div>
+      <h2>Choose your competition.</h2>
+      <p>Select the league you want to follow. Your team and goal will be set in the next step.</p>
+    </div>
+    <div class="competition-grid">
+      <div class="competition-card" id="comp-euroleague" onclick="selectCompetition('euroleague')">
+        <div class="comp-logo">
+          <img src="/images/euroleague-logo.png" alt="EuroLeague" class="comp-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <span style="display:none;font-size:2.2rem">🏆</span>
+        </div>
+        <div class="comp-name">EuroLeague</div>
+        <div class="comp-season">2025-26</div>
+        <div class="comp-desc">Top European club basketball</div>
+      </div>
+      <div class="competition-card" id="comp-nba" onclick="selectCompetition('nba')">
+        <div class="comp-logo">
+          <img src="/images/nba-logo.png" alt="NBA" class="comp-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <span style="display:none;font-size:2.2rem">🏀</span>
+        </div>
+        <div class="comp-name">NBA</div>
+        <div class="comp-season">2025-26</div>
+        <div class="comp-desc">National Basketball Association</div>
+      </div>
     </div>
   </div>
 </section>
@@ -53,7 +90,7 @@
 <section class="screen" id="screen-setup">
   <div class="setup-shell">
     <div class="setup-intro">
-      <div class="auth-kicker">Step 2 of 2</div>
+      <div class="auth-kicker" id="setupStepLabel">Step 2 of 3</div>
       <h2>Choose your team and goal.</h2>
       <p>Your selection shapes the analysis, standings highlights, schedule emphasis, and player context.</p>
     </div>
@@ -64,16 +101,19 @@
     <div class="panel goal-section">
       <div class="section-title highlight-title">Choose Your Goal</div>
       <div class="goal-btns">
-        <button class="goal-btn playoffs" onclick="selectGoal('playoffs')">Playoffs<br><small>Top 6</small></button>
-        <button class="goal-btn playin" onclick="selectGoal('playin')">Play-In<br><small>Top 10</small></button>
+        <button class="goal-btn playoffs" onclick="selectGoal('playoffs')">Playoffs<br><small id="playoffsGoalSub">Top 6</small></button>
+        <button class="goal-btn playin" onclick="selectGoal('playin')">Play-In<br><small id="playinGoalSub">7-10</small></button>
       </div>
     </div>
-    <button class="primary-btn" onclick="completeSetup()">Enter App</button>
+    <div class="setup-footer">
+      <button class="secondary-btn" onclick="goToSetupBack()">← Back</button>
+      <button class="primary-btn setup-enter-btn" onclick="completeSetup()">Enter App</button>
+    </div>
   </div>
 </section>
 
 <section class="screen" id="screen-app">
-<div class="tabs">
+<div class="tabs" id="tabsBar">
 <button class="tab-btn active" onclick="switchTab('analysis')">📊 Analysis</button>
 <button class="tab-btn" onclick="switchTab('standings')">🏆 Standings</button>
 <button class="tab-btn" onclick="switchTab('schedule')">🗓️ Schedule</button>
@@ -81,12 +121,11 @@
 <button class="tab-btn" onclick="switchTab('live')">⚡ Live</button>
 <button class="tab-btn" onclick="switchTab('scenarios')">🧩 Scenarios</button>
 </div>
+<div id="tab-wrapper">
 <div id="tab-analysis" class="tab-content active">
 <div class="analysis-toolbar">
   <div id="analysisSummary"></div>
   <div class="analysis-actions">
-    <button class="secondary-btn" id="logoutBtn" onclick="logout()">Log Out</button>
-    <button class="secondary-btn" onclick="goToSetup()">Change Team / Goal</button>
     <button class="primary-btn compact-btn" onclick="runAnalysis()">Refresh Analysis</button>
   </div>
 </div>
@@ -97,6 +136,7 @@
 <div id="tab-players" class="tab-content"><div id="players-content"></div></div>
 <div id="tab-live" class="tab-content"><div id="live-results-content"></div></div>
 <div id="tab-scenarios" class="tab-content"><div id="scenarios-content"></div></div>
+</div>
 </section>
 </main>
 <div class="result-alert-modal" id="resultAlertModal" aria-hidden="true">

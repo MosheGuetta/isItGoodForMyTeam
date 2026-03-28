@@ -7,42 +7,21 @@ const { URL } = require('url');
 const port = Number(process.env.PORT || 8000);
 const root = path.resolve(__dirname, '..');
 const usersFile = path.join(root, 'users.json');
-const clientDistRoot = path.join(root, 'client', 'dist');
 const legacyRoot = root;
-const staticRoot = fs.existsSync(clientDistRoot) ? clientDistRoot : legacyRoot;
+const staticRoot = legacyRoot;
 const EUROLEAGUE_FEED_BASE = 'https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E';
 const DEFAULT_SEASON_CODE = 'E2025';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const LIVE_CACHE_IDLE_MS = 1000 * 60 * 3;
 const LIVE_CACHE_LIVE_MS = 1000 * 30;
 const TEAM_TLA_MAP = {
-  BAR: 'BAR',
-  BAY: 'MUN',
-  PAO: 'PAN',
-  EFS: 'IST',
-  ASM: 'MCO',
-  HTA: 'HTA',
-  ZAL: 'ZAL',
-  PBB: 'PRS',
-  DUB: 'DUB',
-  VBC: 'PAM',
-  RMB: 'MAD',
-  CZV: 'RED',
-  PAR: 'PAR',
-  KBA: 'BAS',
-  OLY: 'OLY',
-  EA7: 'MIL',
-  MTA: 'TEL',
-  VIR: 'VIR',
-  ASV: 'ASV',
-  FBB: 'ULK'
+  BAR: 'BAR', BAY: 'MUN', PAO: 'PAN', EFS: 'IST', ASM: 'MCO',
+  HTA: 'HTA', ZAL: 'ZAL', PBB: 'PRS', DUB: 'DUB', VBC: 'PAM',
+  RMB: 'MAD', CZV: 'RED', PAR: 'PAR', KBA: 'BAS', OLY: 'OLY',
+  EA7: 'MIL', MTA: 'TEL', VIR: 'VIR', ASV: 'ASV', FBB: 'ULK'
 };
 
-const liveDataCache = {
-  expiresAt: 0,
-  payload: null,
-  promise: null
-};
+const liveDataCache = { expiresAt: 0, payload: null, promise: null };
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -92,29 +71,17 @@ function parseBody(req) {
     let body = '';
     req.on('data', chunk => {
       body += chunk;
-      if (body.length > 1024 * 1024) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-      }
+      if (body.length > 1024 * 1024) { reject(new Error('Request body too large')); req.destroy(); }
     });
     req.on('end', () => {
-      if (!body) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch (_) {
-        reject(new Error('Invalid JSON body'));
-      }
+      if (!body) { resolve({}); return; }
+      try { resolve(JSON.parse(body)); } catch (_) { reject(new Error('Invalid JSON body')); }
     });
     req.on('error', reject);
   });
 }
 
-function normalizeEmail(value) {
-  return String(value || '').trim().toLowerCase();
-}
+function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
@@ -129,17 +96,10 @@ function verifyPassword(password, storedValue) {
 }
 
 function publicUser(user) {
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    preferences: user.preferences || null
-  };
+  return { id: user.id, name: user.name, email: user.email, preferences: user.preferences || null };
 }
 
-function createSessionToken() {
-  return crypto.randomBytes(24).toString('hex');
-}
+function createSessionToken() { return crypto.randomBytes(24).toString('hex'); }
 
 function readAuthToken(req) {
   const header = req.headers.authorization || '';
@@ -153,9 +113,8 @@ function findUserBySession(token, data) {
   return data.users.find(user => user.session?.token === token && user.session?.expiresAt > now) || null;
 }
 
-function isValidGoal(goal) {
-  return goal === 'playoffs' || goal === 'playin';
-}
+function isValidGoal(goal) { return goal === 'playoffs' || goal === 'playin'; }
+function isValidCompetition(comp) { return comp === 'euroleague' || comp === 'nba'; }
 
 async function fetchJson(url) {
   const response = await fetch(url, {
@@ -164,9 +123,7 @@ async function fetchJson(url) {
       Accept: 'application/json'
     }
   });
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
-  }
+  if (!response.ok) throw new Error(`Request failed: ${response.status} ${response.statusText}`);
   return response.json();
 }
 
@@ -201,34 +158,19 @@ function normalizeGame(game) {
   };
 }
 
-function normalizeStandingsRow(group) {
-  const tla = String(group?.groupName ?? group?.tla ?? group?.code ?? '').toUpperCase();
-  if (!tla) return null;
-  const stats = Array.isArray(group?.stats) ? group.stats : [];
-  const values = Object.fromEntries(stats.map(stat => {
-    const name = stat?.name;
-    const rawValue = Array.isArray(stat?.value) ? stat.value[0]?.statValue : stat?.value;
-    return [name, rawValue];
-  }));
-  const parseRecord = record => {
-    const match = String(record || '').match(/(\d+)\s*-\s*(\d+)/);
-    return match ? { w: Number(match[1]), l: Number(match[2]) } : { w: 0, l: 0 };
-  };
-  const home = parseRecord(values.H);
-  const away = parseRecord(values.A);
-  const last10 = parseRecord(values.L10);
+function normalizeOfficialStandingsRow(entry, position) {
+  const club = entry?.club ?? {};
+  const data = entry?.data ?? {};
+  const code = mapTeamCode(club.code ?? club.tvCode ?? club.tla ?? '');
+  if (!code) return null;
   return {
-    code: mapTeamCode(tla),
-    rank: Number(values.Position ?? values.position ?? 99),
-    w: Number(values.Won ?? 0),
-    l: Number(values.Lost ?? 0),
-    pts: Number(String(values['Pts+'] ?? 0).replace(/,/g, '')),
-    ptsA: Number(String(values['Pts-'] ?? 0).replace(/,/g, '')),
-    homeW: home.w,
-    homeL: home.l,
-    awayW: away.w,
-    awayL: away.l,
-    last10: [...Array.from({ length: last10.w }, () => 'W'), ...Array.from({ length: last10.l }, () => 'L')].slice(-10)
+    code,
+    rank: Number(data.position ?? position ?? 99),
+    w: Number(data.gamesWon ?? 0),
+    l: Number(data.gamesLost ?? 0),
+    pts: Number(data.pointsFavour ?? 0),
+    ptsA: Number(data.pointsAgainst ?? 0),
+    homeW: 0, homeL: 0, awayW: 0, awayL: 0, last10: []
   };
 }
 
@@ -242,64 +184,28 @@ async function fetchSeasonGamesFromFeed(seasonCode = DEFAULT_SEASON_CODE) {
 async function fetchRoundsFromFeed(seasonCode = DEFAULT_SEASON_CODE) {
   const payload = await fetchJson(`${EUROLEAGUE_FEED_BASE}/seasons/${seasonCode}/rounds`);
   const rounds = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
-  return rounds
-    .map(entry => Number(entry?.round ?? entry))
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b);
-}
-
-function normalizeOfficialStandingsRow(entry, position) {
-  const club = entry?.club ?? {};
-  const data = entry?.data ?? {};
-  const code = mapTeamCode(club.code ?? club.tvCode ?? club.tla ?? '');
-  if (!code) return null;
-  return {
-    code,
-    rank: Number(data.position ?? position ?? 99),
-    w: Number(data.gamesWon ?? 0),
-    l: Number(data.gamesLost ?? 0),
-    pts: Number(data.pointsFavour ?? 0),
-    ptsA: Number(data.pointsAgainst ?? 0),
-    homeW: 0,
-    homeL: 0,
-    awayW: 0,
-    awayL: 0,
-    last10: []
-  };
+  return rounds.map(entry => Number(entry?.round ?? entry)).filter(Number.isFinite).sort((a, b) => a - b);
 }
 
 async function fetchStandingsFromFeed(round, seasonCode = DEFAULT_SEASON_CODE) {
-  if (!Number.isFinite(round)) {
-    return { standingsStats: [], teamStandingsTable: {} };
-  }
-
+  if (!Number.isFinite(round)) return { standingsStats: [], teamStandingsTable: {} };
   const payload = await fetchJson(`${EUROLEAGUE_FEED_BASE}/seasons/${seasonCode}/rounds/${round}/standings`);
   const groups = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
   const rows = groups.find(group => Array.isArray(group?.standings) && group.standings.length)?.standings ?? [];
   const standingsStats = rows.map((entry, index) => normalizeOfficialStandingsRow(entry, index + 1)).filter(Boolean);
-  const teamStandingsTable = Object.fromEntries(
-    standingsStats
-      .filter(row => row.code)
-      .map(row => [row.code, row.rank])
-  );
-
+  const teamStandingsTable = Object.fromEntries(standingsStats.filter(row => row.code).map(row => [row.code, row.rank]));
   return { standingsStats, teamStandingsTable };
 }
 
 function deriveCurrentRound(games) {
   const rounds = [...new Set(games.map(game => Number(game.round)).filter(Number.isFinite))].sort((a, b) => a - b);
   if (!rounds.length) return null;
-
   for (const round of [...rounds].sort((a, b) => b - a)) {
     const roundGames = games.filter(game => game.round === round);
-    const hasLiveGame = roundGames.some(game => game.live);
-    const hasPlayedGame = roundGames.some(game => game.played);
-    const hasPendingGame = roundGames.some(game => !game.played && !game.live);
-    if (hasLiveGame) return round;
-    if (hasPlayedGame && hasPendingGame) return round;
-    if (hasPlayedGame) return round;
+    if (roundGames.some(game => game.live)) return round;
+    if (roundGames.some(game => game.played) && roundGames.some(game => !game.played && !game.live)) return round;
+    if (roundGames.some(game => game.played)) return round;
   }
-
   return rounds[rounds.length - 1];
 }
 
@@ -313,21 +219,13 @@ async function getEuroleagueFeedFallback(error) {
   const rounds = await fetchRoundsFromFeed(DEFAULT_SEASON_CODE).catch(() => {
     return [...new Set(games.map(game => Number(game.round)).filter(Number.isFinite))].sort((a, b) => a - b);
   });
-
   return {
-    source: 'feed-fallback',
-    fallbackReason: error?.message || null,
-    anyLive: games.some(game => game.live),
-    cacheTtlMs: getLiveCacheTtlMs({ games }),
-    buildId: null,
-    currentRound: deriveCurrentRound(games),
+    source: 'feed-fallback', fallbackReason: error?.message || null,
+    anyLive: games.some(game => game.live), cacheTtlMs: getLiveCacheTtlMs({ games }),
+    buildId: null, currentRound: deriveCurrentRound(games),
     maxRound: rounds.length ? rounds[rounds.length - 1] : null,
-    currentSeasonCode: DEFAULT_SEASON_CODE,
-    allAvailableRounds: rounds,
-    teamStandingsTable: {},
-    standingsStats: [],
-    games,
-    fetchedAt: Date.now()
+    currentSeasonCode: DEFAULT_SEASON_CODE, allAvailableRounds: rounds,
+    teamStandingsTable: {}, standingsStats: [], games, fetchedAt: Date.now()
   };
 }
 
@@ -338,23 +236,12 @@ async function getEuroleagueLiveData() {
       fetchRoundsFromFeed(DEFAULT_SEASON_CODE)
     ]);
     const currentRound = deriveCurrentRound(games);
-    const { standingsStats, teamStandingsTable } = await fetchStandingsFromFeed(currentRound, DEFAULT_SEASON_CODE).catch(() => {
-      return { standingsStats: [], teamStandingsTable: {} };
-    });
-
+    const { standingsStats, teamStandingsTable } = await fetchStandingsFromFeed(currentRound, DEFAULT_SEASON_CODE).catch(() => ({ standingsStats: [], teamStandingsTable: {} }));
     return {
-      source: 'live',
-      anyLive: games.some(game => game.live),
-      cacheTtlMs: getLiveCacheTtlMs({ games }),
-      buildId: null,
-      currentRound,
-      maxRound: rounds.length ? rounds[rounds.length - 1] : null,
-      currentSeasonCode: DEFAULT_SEASON_CODE,
-      allAvailableRounds: rounds,
-      teamStandingsTable,
-      standingsStats,
-      games,
-      fetchedAt: Date.now()
+      source: 'live', anyLive: games.some(game => game.live), cacheTtlMs: getLiveCacheTtlMs({ games }),
+      buildId: null, currentRound, maxRound: rounds.length ? rounds[rounds.length - 1] : null,
+      currentSeasonCode: DEFAULT_SEASON_CODE, allAvailableRounds: rounds,
+      teamStandingsTable, standingsStats, games, fetchedAt: Date.now()
     };
   } catch (error) {
     return getEuroleagueFeedFallback(error);
@@ -363,24 +250,15 @@ async function getEuroleagueLiveData() {
 
 async function getCachedEuroleagueLiveData() {
   const now = Date.now();
-  if (liveDataCache.payload && liveDataCache.expiresAt > now) {
-    return liveDataCache.payload;
-  }
-
-  if (liveDataCache.promise) {
-    return liveDataCache.promise;
-  }
-
+  if (liveDataCache.payload && liveDataCache.expiresAt > now) return liveDataCache.payload;
+  if (liveDataCache.promise) return liveDataCache.promise;
   liveDataCache.promise = getEuroleagueLiveData()
     .then(payload => {
       liveDataCache.payload = payload;
       liveDataCache.expiresAt = Date.now() + getLiveCacheTtlMs(payload);
       return payload;
     })
-    .finally(() => {
-      liveDataCache.promise = null;
-    });
-
+    .finally(() => { liveDataCache.promise = null; });
   return liveDataCache.promise;
 }
 
@@ -390,40 +268,18 @@ async function handleRegister(req, res) {
   const name = String(body.name || '').trim() || 'Fan';
   const email = normalizeEmail(body.email);
   const password = String(body.password || '');
-
-  if (!email || !password) {
-    writeJson(res, 400, { error: 'Email and password are required.' });
-    return;
-  }
-  if (password.length < 6) {
-    writeJson(res, 400, { error: 'Password must be at least 6 characters.' });
-    return;
-  }
-  if (data.users.some(user => user.email === email)) {
-    writeJson(res, 409, { error: 'That email is already registered.' });
-    return;
-  }
-
+  if (!email || !password) { writeJson(res, 400, { error: 'Email and password are required.' }); return; }
+  if (password.length < 6) { writeJson(res, 400, { error: 'Password must be at least 6 characters.' }); return; }
+  if (data.users.some(user => user.email === email)) { writeJson(res, 409, { error: 'That email is already registered.' }); return; }
   const token = createSessionToken();
   const user = {
-    id: crypto.randomUUID(),
-    name,
-    email,
-    passwordHash: hashPassword(password),
-    preferences: null,
-    createdAt: new Date().toISOString(),
-    session: {
-      token,
-      expiresAt: Date.now() + SESSION_TTL_MS
-    }
+    id: crypto.randomUUID(), name, email, passwordHash: hashPassword(password),
+    preferences: null, createdAt: new Date().toISOString(),
+    session: { token, expiresAt: Date.now() + SESSION_TTL_MS }
   };
   data.users.push(user);
   writeUsers(data);
-
-  writeJson(res, 201, {
-    token,
-    user: publicUser(user)
-  });
+  writeJson(res, 201, { token, user: publicUser(user) });
 }
 
 async function handleLogin(req, res) {
@@ -432,51 +288,32 @@ async function handleLogin(req, res) {
   const email = normalizeEmail(body.email);
   const password = String(body.password || '');
   const user = data.users.find(entry => entry.email === email);
-
-  if (!user || !verifyPassword(password, user.passwordHash)) {
-    writeJson(res, 401, { error: 'Invalid email or password.' });
-    return;
-  }
-
-  user.session = {
-    token: createSessionToken(),
-    expiresAt: Date.now() + SESSION_TTL_MS
-  };
+  if (!user || !verifyPassword(password, user.passwordHash)) { writeJson(res, 401, { error: 'Invalid email or password.' }); return; }
+  user.session = { token: createSessionToken(), expiresAt: Date.now() + SESSION_TTL_MS };
   writeUsers(data);
-
-  writeJson(res, 200, {
-    token: user.session.token,
-    user: publicUser(user)
-  });
+  writeJson(res, 200, { token: user.session.token, user: publicUser(user) });
 }
 
 function handleSession(req, res) {
   const data = readUsers();
   const user = findUserBySession(readAuthToken(req), data);
-  if (!user) {
-    writeJson(res, 401, { error: 'Session expired.' });
-    return;
-  }
+  if (!user) { writeJson(res, 401, { error: 'Session expired.' }); return; }
   writeJson(res, 200, { user: publicUser(user) });
 }
 
 async function handlePreferences(req, res) {
   const data = readUsers();
   const user = findUserBySession(readAuthToken(req), data);
-  if (!user) {
-    writeJson(res, 401, { error: 'Session expired.' });
-    return;
-  }
-
+  if (!user) { writeJson(res, 401, { error: 'Session expired.' }); return; }
   const body = await parseBody(req);
+  const competition = String(body.competition || '').trim().toLowerCase();
   const team = String(body.team || '').trim().toUpperCase();
   const goal = String(body.goal || '').trim();
-  if (!team || !isValidGoal(goal)) {
-    writeJson(res, 400, { error: 'Team and goal are required.' });
+  if (!isValidCompetition(competition) || !team || !isValidGoal(goal)) {
+    writeJson(res, 400, { error: 'Competition, team and goal are required.' });
     return;
   }
-
-  user.preferences = { team, goal };
+  user.preferences = { competition, team, goal };
   writeUsers(data);
   writeJson(res, 200, { user: publicUser(user) });
 }
@@ -484,21 +321,13 @@ async function handlePreferences(req, res) {
 function handleLogout(req, res) {
   const data = readUsers();
   const user = findUserBySession(readAuthToken(req), data);
-  if (user) {
-    user.session = null;
-    writeUsers(data);
-  }
+  if (user) { user.session = null; writeUsers(data); }
   writeJson(res, 200, { ok: true });
 }
 
 function writeStatic(res, filePath) {
   fs.readFile(filePath, (error, data) => {
-    if (error) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Not found');
-      return;
-    }
-
+    if (error) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Not found'); return; }
     const ext = path.extname(filePath).toLowerCase();
     const type = mimeTypes[ext] || 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': type });
@@ -508,25 +337,192 @@ function writeStatic(res, filePath) {
 
 function serveStatic(parsedUrl, res) {
   let requestPath = decodeURIComponent(parsedUrl.pathname);
-  if (requestPath === '/') {
-    requestPath = '/index.html';
-  }
-
+  if (requestPath === '/') requestPath = '/index.html';
   const requestedPath = path.normalize(path.join(staticRoot, requestPath));
   if (!requestedPath.startsWith(staticRoot)) {
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Forbidden');
     return;
   }
-
   if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
     writeStatic(res, requestedPath);
     return;
   }
-
-  const spaFallback = path.join(staticRoot, 'index.html');
-  writeStatic(res, spaFallback);
+  writeStatic(res, path.join(staticRoot, 'index.html'));
 }
+
+// ============ NBA LIVE DATA SUPPORT ============
+const NBA_CDN_BASE = 'https://cdn.nba.com/static/json';
+const NBA_STATS_BASE = 'https://stats.nba.com/stats';
+const NBA_SEASON = '2025-26';
+const NBA_SEASON_START = '2025-10-22';
+const NBA_REQ_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://www.nba.com',
+  'Referer': 'https://www.nba.com/',
+  'x-nba-stats-origin': 'stats',
+  'x-nba-stats-token': 'true'
+};
+const nbaCdnHeaders = { 'User-Agent': NBA_REQ_HEADERS['User-Agent'], 'Referer': 'https://www.nba.com/' };
+const nbaLiveCache = { expiresAt: 0, payload: null, promise: null };
+
+async function fetchNbaJson(url, useStatsHeaders) {
+  const hdrs = useStatsHeaders ? NBA_REQ_HEADERS : nbaCdnHeaders;
+  const resp = await fetch(url, { headers: hdrs });
+  if (!resp.ok) throw new Error('NBA API error: ' + resp.status + ' ' + url);
+  return resp.json();
+}
+
+async function fetchNbaStandings() {
+  const url = NBA_STATS_BASE + '/leaguestandingsv3?LeagueID=00&Season=' + NBA_SEASON + '&SeasonType=Regular+Season&Section=overall';
+  const payload = await fetchNbaJson(url, true);
+  const rs = (payload.resultSets || []).find(r => r.name === 'Standings');
+  if (!rs) return { standingsStats: [], teamStandingsTable: {} };
+  const H = rs.headers || [];
+  const idx = n => H.indexOf(n);
+  const rows = rs.rowSet || [];
+  const standingsStats = rows.map((row, i) => {
+    const abbr = row[idx('TeamAbbreviation')] || '';
+    const wins = Number(row[idx('WINS')] || 0);
+    const losses = Number(row[idx('LOSSES')] || 0);
+    const homeRec = String(row[idx('HOME')] || '0-0').split('-');
+    const roadRec = String(row[idx('ROAD')] || '0-0').split('-');
+    const l10 = String(row[idx('L10')] || '0-0').split('-');
+    const rank = Number(row[idx('LeagueRank')] || i + 1);
+    const confRank = Number(row[idx('PlayoffRank')] || 0);
+    const conf = String(row[idx('Conference')] || '');
+    const streak = String(row[idx('strCurrentStreak')] || '');
+    const streakArr = [];
+    const sm = streak.match(/(W|L)(\d+)/);
+    if (sm) { const n = Math.min(Number(sm[2]), 10), t = sm[1]; for (let s = 0; s < n; s++) streakArr.push(t); }
+    return {
+      code: abbr, rank, confRank, conference: conf,
+      w: wins, l: losses, pts: 0, ptsA: 0,
+      homeW: Number(homeRec[0] || 0), homeL: Number(homeRec[1] || 0),
+      awayW: Number(roadRec[0] || 0), awayL: Number(roadRec[1] || 0),
+      last10: [...Array.from({ length: Number(l10[0] || 0) }, () => 'W'), ...Array.from({ length: Number(l10[1] || 0) }, () => 'L')].slice(-10)
+    };
+  });
+  const teamStandingsTable = {};
+  standingsStats.forEach(t => { teamStandingsTable[t.code] = t.rank; });
+  return { standingsStats, teamStandingsTable };
+}
+
+async function fetchNbaSchedule() {
+  const payload = await fetchNbaJson(NBA_CDN_BASE + '/staticData/scheduleLeagueV2_1.json', false);
+  const gameDates = (payload.leagueSchedule || {}).gameDates || [];
+  const games = [];
+  const seasonStart = new Date(NBA_SEASON_START);
+  for (const gd of gameDates) {
+    for (const g of (gd.games || [])) {
+      const dateStr = g.gameDateTimeUTC || g.gameDateUTC || '';
+      const d = new Date(dateStr);
+      const week = Math.max(1, Math.floor((d - seasonStart) / (7 * 24 * 60 * 60 * 1000)) + 1);
+      const isPlayed = g.gameStatus === 3 || g.gameStatusText === 'Final';
+      games.push({
+        gameCode: g.gameId, round: week, date: dateStr,
+        status: g.gameStatus === 1 ? 'confirmed' : g.gameStatus === 2 ? 'live' : 'final',
+        played: isPlayed, live: g.gameStatus === 2,
+        minute: null, quarter: null, quarterMinute: null, remainingTime: null,
+        home: { code: (g.homeTeam || {}).teamTricode || '', score: Number((g.homeTeam || {}).score || 0) },
+        away: { code: (g.awayTeam || {}).teamTricode || '', score: Number((g.awayTeam || {}).score || 0) }
+      });
+    }
+  }
+  return games;
+}
+
+async function fetchNbaTodayLive() {
+  const data = await fetchNbaJson(NBA_CDN_BASE + '/liveData/scoreboard/todaysScoreboard_00.json', false);
+  const games = ((data.scoreboard || {}).games) || [];
+  const seasonStart = new Date(NBA_SEASON_START);
+  return games.map(g => {
+    const d = new Date(g.gameTimeUTC || '');
+    const week = Math.max(1, Math.floor((d - seasonStart) / (7 * 24 * 60 * 60 * 1000)) + 1);
+    return {
+      gameCode: g.gameId, round: week, date: g.gameTimeUTC || '',
+      status: g.gameStatus === 1 ? 'confirmed' : g.gameStatus === 2 ? 'live' : 'final',
+      played: g.gameStatus === 3, live: g.gameStatus === 2,
+      minute: g.gameStatus === 2 ? (g.gameClock || null) : null,
+      quarter: g.gameStatus === 2 ? g.period : null,
+      quarterMinute: null, remainingTime: g.gameStatus === 2 ? (g.gameClock || null) : null,
+      home: { code: (g.homeTeam || {}).teamTricode || '', score: Number((g.homeTeam || {}).score || 0) },
+      away: { code: (g.awayTeam || {}).teamTricode || '', score: Number((g.awayTeam || {}).score || 0) }
+    };
+  });
+}
+
+async function fetchNbaPlayerStats() {
+  const url = NBA_STATS_BASE + '/leaguedashplayerstats?College=&Conference=&Country=&DateFrom=&DateTo=&Division=&DraftPick=&DraftYear=&GameScope=&GameSegment=&Height=&ISTRound=&LastNGames=0&LeagueID=00&Location=&MeasureType=Base&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlayerExperience=&PlayerPosition=&PlusMinus=N&Rank=N&Season=2025-26&SeasonSegment=&SeasonType=Regular+Season&ShotClockRange=&StarterBench=&TeamID=0&TwoWay=0&VsConference=&VsDivision=&Weight=';
+  const payload = await fetchNbaJson(url, true);
+  const rs = (payload.resultSets || []).find(r => r.name === 'LeagueDashPlayerStats');
+  if (!rs) return {};
+  const H = rs.headers || [];
+  const idx = n => H.indexOf(n);
+  const result = {};
+  for (const row of (rs.rowSet || [])) {
+    const pid = String(row[idx('PLAYER_ID')] || '');
+    if (!pid) continue;
+    result[pid] = {
+      name: row[idx('PLAYER_NAME')] || '',
+      team: row[idx('TEAM_ABBREVIATION')] || '',
+      photo: 'https://cdn.nba.com/headshots/nba/latest/260x190/' + pid + '.png',
+      pos: row[idx('PlayerPosition')] || '',
+      gp: Number(row[idx('GP')] || 0),
+      pts: +(Number(row[idx('PTS')] || 0).toFixed(1)),
+      reb: +(Number(row[idx('REB')] || 0).toFixed(1)),
+      ast: +(Number(row[idx('AST')] || 0).toFixed(1)),
+      stl: +(Number(row[idx('STL')] || 0).toFixed(1)),
+      blk: +(Number(row[idx('BLK')] || 0).toFixed(1)),
+      pir: 0
+    };
+  }
+  return result;
+}
+
+async function buildNbaLiveData() {
+  const [standingsData, seasonGames] = await Promise.all([
+    fetchNbaStandings(),
+    fetchNbaSchedule().catch(() => [])
+  ]);
+  const todayGames = await fetchNbaTodayLive().catch(() => []);
+  const gamesMap = {};
+  for (const g of seasonGames) gamesMap[g.gameCode] = g;
+  for (const g of todayGames) gamesMap[g.gameCode] = { ...(gamesMap[g.gameCode] || {}), ...g };
+  const allGames = Object.values(gamesMap);
+  const anyLive = allGames.some(g => g.live);
+  const weeks = [...new Set(allGames.map(g => g.round).filter(Number.isFinite))].sort((a, b) => a - b);
+  const maxRound = weeks.length ? weeks[weeks.length - 1] : 30;
+  const playedGames = allGames.filter(g => g.played);
+  const currentRound = playedGames.length ? Math.max(...playedGames.map(g => g.round)) : 1;
+  return {
+    source: 'live', anyLive, cacheTtlMs: anyLive ? 30000 : 180000, buildId: null,
+    currentRound, maxRound, currentSeasonCode: NBA_SEASON,
+    allAvailableRounds: weeks.length ? weeks : [...Array(30)].map((_, i) => i + 1),
+    teamStandingsTable: standingsData.teamStandingsTable,
+    standingsStats: standingsData.standingsStats,
+    games: allGames, fetchedAt: new Date()
+  };
+}
+
+async function getCachedNbaLiveData() {
+  const now = Date.now();
+  if (nbaLiveCache.payload && nbaLiveCache.expiresAt > now) return nbaLiveCache.payload;
+  if (nbaLiveCache.promise) return nbaLiveCache.promise;
+  nbaLiveCache.promise = buildNbaLiveData()
+    .then(p => { nbaLiveCache.payload = p; nbaLiveCache.expiresAt = Date.now() + (p.cacheTtlMs || 180000); return p; })
+    .catch(err => ({
+      source: 'error', error: err.message, anyLive: false, cacheTtlMs: 60000, buildId: null,
+      currentRound: 1, maxRound: 30, currentSeasonCode: NBA_SEASON,
+      allAvailableRounds: [...Array(30)].map((_, i) => i + 1),
+      teamStandingsTable: {}, standingsStats: [], games: [], fetchedAt: new Date()
+    }))
+    .finally(() => { nbaLiveCache.promise = null; });
+  return nbaLiveCache.promise;
+}
+// ============ END NBA LIVE DATA SUPPORT ============
 
 http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://localhost:${port}`);
@@ -542,32 +538,21 @@ http.createServer(async (req, res) => {
       writeJson(res, 200, payload);
       return;
     }
-
-    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/register') {
-      await handleRegister(req, res);
+    if (req.method === 'GET' && parsedUrl.pathname === '/api/nba/live-data') {
+      const payload = await getCachedNbaLiveData();
+      writeJson(res, 200, payload);
       return;
     }
-
-    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/login') {
-      await handleLogin(req, res);
+    if (req.method === 'GET' && parsedUrl.pathname === '/api/nba/players') {
+      const players = await fetchNbaPlayerStats().catch(err => ({ error: err.message }));
+      writeJson(res, 200, players);
       return;
     }
-
-    if (req.method === 'GET' && parsedUrl.pathname === '/api/auth/session') {
-      handleSession(req, res);
-      return;
-    }
-
-    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/logout') {
-      handleLogout(req, res);
-      return;
-    }
-
-    if (req.method === 'PUT' && parsedUrl.pathname === '/api/user/preferences') {
-      await handlePreferences(req, res);
-      return;
-    }
-
+    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/register') { await handleRegister(req, res); return; }
+    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/login') { await handleLogin(req, res); return; }
+    if (req.method === 'GET' && parsedUrl.pathname === '/api/auth/session') { handleSession(req, res); return; }
+    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/logout') { handleLogout(req, res); return; }
+    if (req.method === 'PUT' && parsedUrl.pathname === '/api/user/preferences') { await handlePreferences(req, res); return; }
     serveStatic(parsedUrl, res);
   } catch (error) {
     const statusCode = error.message === 'Invalid JSON body' ? 400 : 500;
