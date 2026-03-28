@@ -8,7 +8,7 @@ const port = Number(process.env.PORT || 8000);
 const root = path.resolve(__dirname, '..');
 const usersFile = path.join(root, 'users.json');
 const legacyRoot = root;
-const staticRoot = legacyRoot;
+const staticRoot = path.join(root, 'client', 'dist');
 const EUROLEAGUE_FEED_BASE = 'https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E';
 const DEFAULT_SEASON_CODE = 'E2025';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -323,6 +323,51 @@ function handleLogout(req, res) {
   const user = findUserBySession(readAuthToken(req), data);
   if (user) { user.session = null; writeUsers(data); }
   writeJson(res, 200, { ok: true });
+}
+
+const RESET_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
+
+async function handleForgotPassword(req, res) {
+  const body = await parseBody(req);
+  const email = normalizeEmail(body.email);
+  if (!email) { writeJson(res, 400, { error: 'Email is required.' }); return; }
+
+  const data = readUsers();
+  const user = data.users.find(u => u.email === email);
+
+  // Always respond with success to avoid leaking whether the email is registered
+  if (user) {
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.passwordReset = { token: resetToken, expiresAt: Date.now() + RESET_TOKEN_TTL_MS };
+    writeUsers(data);
+    // In production, send an email with the reset link here.
+    // For now, log to console so developers can test the flow.
+    console.log(`[Password Reset] Token for ${email}: ${resetToken}`);
+    console.log(`[Password Reset] Link: /reset-password?token=${resetToken}`);
+  }
+
+  writeJson(res, 200, { ok: true, message: 'If that email is registered, a reset link has been sent.' });
+}
+
+async function handleResetPassword(req, res) {
+  const body = await parseBody(req);
+  const token = String(body.token || '').trim();
+  const newPassword = String(body.newPassword || '');
+
+  if (!token || !newPassword) { writeJson(res, 400, { error: 'Token and new password are required.' }); return; }
+  if (newPassword.length < 6) { writeJson(res, 400, { error: 'Password must be at least 6 characters.' }); return; }
+
+  const data = readUsers();
+  const now = Date.now();
+  const user = data.users.find(u => u.passwordReset?.token === token && u.passwordReset?.expiresAt > now);
+
+  if (!user) { writeJson(res, 400, { error: 'This reset link is invalid or has expired.' }); return; }
+
+  user.passwordHash = hashPassword(newPassword);
+  user.passwordReset = null;
+  user.session = null; // Invalidate existing sessions for security
+  writeUsers(data);
+  writeJson(res, 200, { ok: true, message: 'Password updated. Please log in with your new password.' });
 }
 
 function writeStatic(res, filePath) {
@@ -675,6 +720,8 @@ http.createServer(async (req, res) => {
     if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/login') { await handleLogin(req, res); return; }
     if (req.method === 'GET' && parsedUrl.pathname === '/api/auth/session') { handleSession(req, res); return; }
     if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/logout') { handleLogout(req, res); return; }
+    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/forgot-password') { await handleForgotPassword(req, res); return; }
+    if (req.method === 'POST' && parsedUrl.pathname === '/api/auth/reset-password') { await handleResetPassword(req, res); return; }
     if (req.method === 'PUT' && parsedUrl.pathname === '/api/user/preferences') { await handlePreferences(req, res); return; }
     serveStatic(parsedUrl, res);
   } catch (error) {

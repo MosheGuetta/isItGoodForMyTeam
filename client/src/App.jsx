@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { initLegacyApp } from './legacy/app-runtime';
 
 export default function App() {
+  const [showPassword, setShowPassword] = useState(false);
+
   useEffect(() => {
     initLegacyApp();
   }, []);
@@ -75,12 +77,42 @@ export default function App() {
                 <label className="field-label" htmlFor="authPassword">
                   Password
                 </label>
-                <input
-                  className="app-input"
-                  id="authPassword"
-                  type="password"
-                  placeholder="••••••••"
-                />
+                <div className="password-wrapper">
+                  <input
+                    className="app-input"
+                    id="authPassword"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    className="password-eye-btn"
+                    onClick={() => setShowPassword(v => !v)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="forgot-row" id="forgotRow">
+                <button
+                  type="button"
+                  className="forgot-link"
+                  onClick={() => window.openForgotPassword?.()}
+                >
+                  Forgot password?
+                </button>
               </div>
               <p className="auth-note" id="authModeCopy">
                 Welcome back. Log in to keep your saved team context across
@@ -228,6 +260,49 @@ export default function App() {
           </div>
         </section>
       </main>
+      {/* Forgot Password Modal */}
+      <div className="result-alert-modal" id="forgotPasswordModal" aria-hidden="true">
+        <div
+          className="result-alert-backdrop"
+          onClick={() => window.closeForgotPassword?.()}
+        />
+        <div
+          className="result-alert-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="forgotPasswordTitle"
+        >
+          <div className="result-alert-kicker">Account recovery</div>
+          <div className="result-alert-title" id="forgotPasswordTitle">Reset your password</div>
+          <p className="forgot-modal-desc">Enter your email and we'll send you a reset link.</p>
+          <div className="auth-fields" style={{marginTop: '14px'}}>
+            <label className="field-label" htmlFor="forgotEmail">Email</label>
+            <input
+              className="app-input"
+              id="forgotEmail"
+              type="email"
+              placeholder="you@example.com"
+            />
+          </div>
+          <div className="auth-error" id="forgotError" />
+          <div className="auth-success" id="forgotSuccess" />
+          <button
+            className="primary-btn result-alert-btn"
+            id="forgotSubmitBtn"
+            onClick={() => window.submitForgotPassword?.()}
+          >
+            <span id="forgotSubmitLabel">Send Reset Link</span>
+          </button>
+          <button
+            type="button"
+            className="forgot-cancel-btn"
+            onClick={() => window.closeForgotPassword?.()}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+
       <div className="result-alert-modal" id="resultAlertModal" aria-hidden="true">
         <div
           className="result-alert-backdrop"
