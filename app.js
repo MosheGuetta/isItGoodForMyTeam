@@ -302,28 +302,33 @@ function applyUserPreferences(user) {
 
 async function restoreSession() {
   if (!APP.sessionToken) return;
+  // Separate the auth network call from rendering so that a render error
+  // never accidentally clears a valid session.
+  let sessionUser = null;
   try {
     const payload = await apiRequest('/api/auth/session', { method: 'GET', headers: {} });
     setSession(APP.sessionToken, payload.user);
-    applyUserPreferences(payload.user);
-    if (payload.user?.preferences?.competition) {
-      // Has full saved preferences — go straight to app, load the right data
-      APP.currentScreen = 'app';
-      if (isNBA()) await loadNBALiveData();
-      renderScreen();
-      renderStandings();
-      renderSchedule();
-      renderPlayers();
-      renderScenarios();
-      runAnalysis();
-    } else if (payload.user) {
-      // Logged in but no preferences saved — go to competition picker
-      APP.currentScreen = 'competition';
-      renderScreen();
-    }
+    sessionUser = payload.user;
   } catch (_) {
     setSession('', null);
     APP.currentScreen = 'auth';
+    renderScreen();
+    return;
+  }
+  applyUserPreferences(sessionUser);
+  if (sessionUser?.preferences?.competition) {
+    // Has full saved preferences — go straight to app, load the right data
+    APP.currentScreen = 'app';
+    if (isNBA()) await loadNBALiveData();
+    renderScreen();
+    renderStandings();
+    renderSchedule();
+    renderPlayers();
+    try { renderScenarios(); } catch (e) { console.error('renderScenarios error:', e); }
+    runAnalysis();
+  } else if (sessionUser) {
+    // Logged in but no preferences saved — go to competition picker
+    APP.currentScreen = 'competition';
     renderScreen();
   }
 }
@@ -347,6 +352,9 @@ async function submitAuth() {
 
   APP.authBusy = true;
   renderAuthState('');
+  // Keep auth network call separate from rendering so a render error never
+  // surfaces as a login failure or prevents the user from reaching the app.
+  let authUser = null;
   try {
     const endpoint = APP.authMode === 'register' ? '/api/auth/register' : '/api/auth/login';
     const payload = await apiRequest(endpoint, {
@@ -354,25 +362,28 @@ async function submitAuth() {
       body: JSON.stringify({ name: enteredName, email, password })
     });
     setSession(payload.token, payload.user);
-    applyUserPreferences(payload.user);
-    if (payload.user?.preferences?.competition) {
-      APP.currentScreen = 'app';
-      if (isNBA()) await loadNBALiveData();
-      renderScreen();
-      renderStandings();
-      renderSchedule();
-      renderPlayers();
-      renderScenarios();
-      runAnalysis();
-    } else {
-      APP.currentScreen = 'competition';
-      renderScreen();
-    }
+    authUser = payload.user;
   } catch (error) {
     renderAuthState(error.message);
-  } finally {
     APP.authBusy = false;
     renderAuthState(document.getElementById('authError')?.textContent?.trim() || '');
+    return;
+  }
+  APP.authBusy = false;
+  renderAuthState('');
+  applyUserPreferences(authUser);
+  if (authUser?.preferences?.competition) {
+    APP.currentScreen = 'app';
+    if (isNBA()) await loadNBALiveData();
+    renderScreen();
+    renderStandings();
+    renderSchedule();
+    renderPlayers();
+    try { renderScenarios(); } catch (e) { console.error('renderScenarios error:', e); }
+    runAnalysis();
+  } else {
+    APP.currentScreen = 'competition';
+    renderScreen();
   }
 }
 
@@ -400,7 +411,8 @@ async function completeSetup() {
   renderStandings();
   renderSchedule();
   renderPlayers();
-  renderScenarios();
+  // Wrap renderScenarios so any unexpected error doesn't block runAnalysis.
+  try { renderScenarios(); } catch (e) { console.error('renderScenarios error:', e); }
   switchTab('analysis');
   runAnalysis();
 }
@@ -1335,7 +1347,7 @@ function analyzeGameForTeam(game, myTeam, goalRank, goalLabel) {
     const oppClub = displayTeamName(opp?.code || (hc === tc ? ac : hc));
     const summary = `${displayTeamName(tc)} must beat ${oppClub}.`;
     const details = `A win is the most direct way to close the gap to ${goalLabel} and prevents dropping further behind in the standings race.`;
-    const mv = myTeam.h2h[opp?.code] || {w:0,l:0,pf:0,pa:0};
+    const mv = (myTeam.h2h || {})[opp?.code] || {w:0,l:0,pf:0,pa:0};
     const d = mv.pf - mv.pa;
     const h2hNote = mv.w + mv.l > 0
       ? `H2H vs ${oppClub}: ${mv.w}-${mv.l}${mv.w + mv.l > 1 ? `, ${d >= 0 ? '+' : ''}${d} points` : ''}.`
@@ -1389,7 +1401,7 @@ function analyzeGameForTeam(game, myTeam, goalRank, goalLabel) {
 
   const summary = `${displayTeamName(preferredWinner)} win is good for ${displayTeamName(tc)}.`;
   const details = `${buildPressureReason(threatenedTeam, myTeam, goalRank)}, so ${displayTeamName(threatenedTeam.code)} losing helps ${displayTeamName(tc)}'s path to ${goalLabel}.`;
-  const mv = myTeam.h2h[threatenedTeam.code] || {w:0,l:0,pf:0,pa:0};
+  const mv = (myTeam.h2h || {})[threatenedTeam.code] || {w:0,l:0,pf:0,pa:0};
   const d = mv.pf - mv.pa;
   const h2hNote = mv.w + mv.l > 0
     ? `H2H vs ${displayTeamName(threatenedTeam.code)}: ${mv.w}-${mv.l}, ${d >= 0 ? '+' : ''}${d} points.`
