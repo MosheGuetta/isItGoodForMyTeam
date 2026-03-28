@@ -952,7 +952,30 @@ body{
   .scenario-header{flex-direction:column}
   .scenario-bucket-head{flex-direction:column}
   .scenario-placement{align-items:flex-start;min-width:0}
-  .hdr-btn{font-size:.64rem;height:24px;padding:0 7px}
   .header-btns{transform:translateY(calc(18px + 1.5mm))}
   .app-subtitle{max-width:160px}
+}
+@media (max-width:720px) and (orientation:portrait){
+  .hdr-top{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    align-items:end;
+  }
+  .header-btns{
+    justify-content:flex-end;
+    transform:translateY(calc(14px + 2.5mm));
+  }
+  .hdr-btn{
+    min-height:24px;
+    height:24px;
+    padding:0 10px;
+    font-size:.7rem;
+    font-weight:800;
+    border-radius:999px;
+  }
+}
+@media (max-width:722px) and (orientation:portrait){
+  .header-btns{
+    transform:translateY(calc(14px + 3.5mm));
+  }
 }
