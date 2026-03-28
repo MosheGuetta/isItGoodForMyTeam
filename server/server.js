@@ -7,6 +7,8 @@ const { URL } = require('url');
 const port = Number(process.env.PORT || 8000);
 const root = path.resolve(__dirname, '..');
 const usersFile = path.join(root, 'users.json');
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${port}`;
 const legacyRoot = root;
 const staticRoot = legacyRoot;
 const EUROLEAGUE_FEED_BASE = 'https://feeds.incrowdsports.com/provider/euroleague-feeds/v2/competitions/E';
@@ -327,6 +329,38 @@ function handleLogout(req, res) {
 
 const RESET_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
 
+async function sendResetEmail(toEmail, resetToken) {
+  if (!RESEND_API_KEY) {
+    console.log(`[Password Reset] No RESEND_API_KEY set. Token for ${toEmail}: ${resetToken}`);
+    return;
+  }
+  const resetLink = `${APP_BASE_URL}/?reset=${resetToken}`;
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: 'Is It Good For My Team? <onboarding@resend.dev>',
+      to: toEmail,
+      subject: 'Reset your password',
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#09080f;color:#f5f7fb;border-radius:16px">
+          <h2 style="margin:0 0 8px;color:#ff8a1d">🏀 Is It Good For My Team?</h2>
+          <p style="color:#9ca1bd;margin:0 0 24px">You requested a password reset.</p>
+          <a href="${resetLink}" style="display:inline-block;padding:14px 28px;background:linear-gradient(180deg,#b85a10,#8d4308);color:#f7f4ee;text-decoration:none;border-radius:12px;font-weight:700">Reset my password</a>
+          <p style="color:#9ca1bd;font-size:.85rem;margin-top:24px">This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>
+        </div>
+      `
+    })
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to send email.');
+  }
+}
+
 async function handleForgotPassword(req, res) {
   const body = await parseBody(req);
   const email = normalizeEmail(body.email);
@@ -335,17 +369,18 @@ async function handleForgotPassword(req, res) {
   const data = readUsers();
   const user = data.users.find(u => u.email === email);
 
-  // Always respond with success to avoid leaking whether the email is registered
   if (user) {
     const resetToken = crypto.randomBytes(32).toString('hex');
     user.passwordReset = { token: resetToken, expiresAt: Date.now() + RESET_TOKEN_TTL_MS };
     writeUsers(data);
-    // In production, send an email with the reset link here.
-    // For now, log to console so developers can test the flow.
-    console.log(`[Password Reset] Token for ${email}: ${resetToken}`);
-    console.log(`[Password Reset] Link: /reset-password?token=${resetToken}`);
+    try {
+      await sendResetEmail(email, resetToken);
+    } catch (err) {
+      console.error('[Password Reset] Email send failed:', err.message);
+    }
   }
 
+  // Always return success to avoid revealing whether email is registered
   writeJson(res, 200, { ok: true, message: 'If that email is registered, a reset link has been sent.' });
 }
 

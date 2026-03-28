@@ -2538,5 +2538,55 @@ function teamLabel(code) {
   return euroleagueName || normalizedCode;
 }
 
+function toggleResetPasswordVisibility() {
+  const input = document.getElementById('resetPassword');
+  const showIcon = document.getElementById('resetEyeShow');
+  const hideIcon = document.getElementById('resetEyeHide');
+  if (!input) return;
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  if (showIcon) showIcon.style.display = isHidden ? 'none' : '';
+  if (hideIcon) hideIcon.style.display = isHidden ? '' : 'none';
+}
+
+async function submitResetPassword() {
+  const token = new URLSearchParams(window.location.search).get('reset');
+  const input = document.getElementById('resetPassword');
+  const errorEl = document.getElementById('resetError');
+  const successEl = document.getElementById('resetSuccess');
+  const submitLabel = document.getElementById('resetSubmitLabel');
+  const submitBtn = document.getElementById('resetSubmitBtn');
+  const newPassword = input?.value.trim();
+  if (!newPassword) {
+    if (errorEl) { errorEl.textContent = 'Please enter a new password.'; errorEl.style.display = 'block'; }
+    return;
+  }
+  if (submitLabel) submitLabel.textContent = 'Saving...';
+  if (submitBtn) submitBtn.disabled = true;
+  if (errorEl) errorEl.style.display = 'none';
+  if (successEl) successEl.style.display = 'none';
+  try {
+    await apiRequest('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) });
+    if (successEl) { successEl.textContent = 'Password updated! Redirecting to login...'; successEl.style.display = 'block'; }
+    if (submitLabel) submitLabel.textContent = 'Done!';
+    setTimeout(() => {
+      window.history.replaceState({}, '', '/');
+      APP.currentScreen = 'auth';
+      renderScreen();
+      setAuthMode('login');
+    }, 2000);
+  } catch (err) {
+    if (errorEl) { errorEl.textContent = err.message || 'This link is invalid or has expired.'; errorEl.style.display = 'block'; }
+    if (submitLabel) submitLabel.textContent = 'Set New Password';
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+function checkResetToken() {
+  const token = new URLSearchParams(window.location.search).get('reset');
+  if (token) { APP.currentScreen = 'reset'; renderScreen(); }
+}
+
 // Start
 init();
+checkResetToken();
