@@ -36,6 +36,7 @@ const APP = {
   authMode: 'login',
   sessionToken: localStorage.getItem('igtmt-session-token') || '',
   currentUser: null,
+  selectedCompetition: 'euroleague',
   selectedTeam: null,
   selectedGoal: null,
   allGames: GAMES_DATA,
@@ -199,16 +200,30 @@ function setSession(token, user) {
   }
 }
 
-function applyUserPreferences(user) {
+function getSupportedPreferences(user) {
   const preferences = user?.preferences || null;
-  APP.selectedTeam = normalizeTeamCode(preferences?.team || null) || null;
-  APP.selectedGoal = preferences?.goal || null;
+  const competition = preferences?.competition || 'euroleague';
+  if (!preferences) {
+    return { preferences: null, supported: false };
+  }
+  if (competition !== 'euroleague') {
+    return { preferences, supported: false };
+  }
+  return { preferences, supported: true };
+}
+
+function applyUserPreferences(user) {
+  const { preferences, supported } = getSupportedPreferences(user);
+  APP.selectedCompetition = preferences?.competition || 'euroleague';
+  APP.selectedTeam = supported ? (normalizeTeamCode(preferences?.team || null) || null) : null;
+  APP.selectedGoal = supported ? (preferences?.goal || null) : null;
   renderTeamGrid();
   document.querySelectorAll('.goal-btn').forEach(btn => btn.classList.remove('selected'));
   if (APP.selectedGoal) document.querySelector(`.goal-btn.${APP.selectedGoal}`)?.classList.add('selected');
   renderAnalysisSummary();
   updateHeaderStatus();
   renderScenarios();
+  return supported;
 }
 
 async function restoreSession() {
@@ -216,9 +231,12 @@ async function restoreSession() {
   try {
     const payload = await apiRequest('/api/auth/session', { method: 'GET', headers: {} });
     setSession(APP.sessionToken, payload.user);
-    applyUserPreferences(payload.user);
-    APP.currentScreen = payload.user?.preferences ? 'app' : 'setup';
+    const hasSupportedPreferences = applyUserPreferences(payload.user);
+    APP.currentScreen = hasSupportedPreferences ? 'app' : 'setup';
     renderScreen();
+    if (payload.user?.preferences?.competition === 'nba') {
+      renderAuthState('This mobile app currently restores EuroLeague selections only. Choose a EuroLeague team to continue.');
+    }
     if (APP.currentScreen === 'app') {
       renderStandings();
       renderSchedule();
@@ -259,9 +277,12 @@ async function submitAuth() {
       body: JSON.stringify({ name: enteredName, email, password })
     });
     setSession(payload.token, payload.user);
-    applyUserPreferences(payload.user);
-    APP.currentScreen = payload.user?.preferences ? 'app' : 'setup';
+    const hasSupportedPreferences = applyUserPreferences(payload.user);
+    APP.currentScreen = hasSupportedPreferences ? 'app' : 'setup';
     renderScreen();
+    if (payload.user?.preferences?.competition === 'nba') {
+      renderAuthState('This mobile app currently restores EuroLeague selections only. Choose a EuroLeague team to continue.');
+    }
     if (APP.currentScreen === 'app') {
       renderStandings();
       renderSchedule();
@@ -335,7 +356,7 @@ function getTeam(c) {
 }
 function clubOf(c) {
   const code = normalizeTeamCode(c);
-  return APP.clubs[code] || {abbr:code, name:code, logo:''};
+  return APP.clubs?.[code] || {abbr:code, name:code, logo:''};
 }
 function displayTeamName(c) { return teamLabel(c); }
 function getTeamRecordParts(code) {
