@@ -356,6 +356,8 @@ const NBA_CDN_BASE = 'https://cdn.nba.com/static/json';
 const NBA_STATS_BASE = 'https://stats.nba.com/stats';
 const NBA_SEASON = '2025-26';
 const NBA_SEASON_START = '2025-10-22';
+const NBA_SEASON_END = '2026-04-20';
+const ESPN_NBA_SCOREBOARD_BASE = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
 const NBA_TEAM_ID_TO_CODE = {
   1610612737: 'ATL',
   1610612738: 'BOS',
@@ -388,6 +390,13 @@ const NBA_TEAM_ID_TO_CODE = {
   1610612762: 'UTA',
   1610612764: 'WAS'
 };
+const ESPN_TEAM_CODE_ALIASES = {
+  GS: 'GSW',
+  NO: 'NOP',
+  NY: 'NYK',
+  PHO: 'PHX',
+  SA: 'SAS'
+};
 const NBA_REQ_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
@@ -405,6 +414,83 @@ async function fetchNbaJson(url, useStatsHeaders) {
   const resp = await fetch(url, { headers: hdrs });
   if (!resp.ok) throw new Error('NBA API error: ' + resp.status + ' ' + url);
   return resp.json();
+}
+
+function normalizeEspnTeamCode(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  return ESPN_TEAM_CODE_ALIASES[normalized] || normalized;
+}
+
+function formatDateStamp(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}${month}${day}`;
+}
+
+function normalizeEspnNbaGame(event) {
+  const competition = event?.competitions?.[0] || {};
+  const competitors = Array.isArray(competition.competitors) ? competition.competitors : [];
+  const home = competitors.find(item => item.homeAway === 'home') || {};
+  const away = competitors.find(item => item.homeAway === 'away') || {};
+  const homeCode = normalizeEspnTeamCode(home?.team?.abbreviation);
+  const awayCode = normalizeEspnTeamCode(away?.team?.abbreviation);
+  if (!homeCode || !awayCode) return null;
+
+  const dateStr = event?.date || competition?.date || '';
+  const tipoff = new Date(dateStr);
+  const seasonStart = new Date(NBA_SEASON_START);
+  const week = Math.max(1, Math.floor((tipoff - seasonStart) / (7 * 24 * 60 * 60 * 1000)) + 1);
+  const completed = Boolean(competition?.status?.type?.completed);
+  const liveState = String(competition?.status?.type?.state || '').toLowerCase();
+  const live = liveState === 'in';
+
+  return {
+    gameCode: event?.id || competition?.id || `${homeCode}-${awayCode}-${formatDateStamp(tipoff)}`,
+    round: week,
+    date: dateStr,
+    status: completed ? 'final' : live ? 'live' : 'confirmed',
+    played: completed,
+    live,
+    minute: live ? (competition?.status?.displayClock || null) : null,
+    quarter: live ? Number(competition?.status?.period || 0) : null,
+    quarterMinute: null,
+    remainingTime: live ? (competition?.status?.displayClock || null) : null,
+    home: { code: homeCode, score: Number(home?.score || 0) },
+    away: { code: awayCode, score: Number(away?.score || 0) }
+  };
+}
+
+async function fetchEspnNbaScoreboardForDate(date) {
+  const url = `${ESPN_NBA_SCOREBOARD_BASE}?dates=${formatDateStamp(date)}`;
+  const resp = await fetch(url, { headers: { 'User-Agent': NBA_REQ_HEADERS['User-Agent'] } });
+  if (!resp.ok) throw new Error('ESPN NBA API error: ' + resp.status + ' ' + url);
+  return resp.json();
+}
+
+async function fetchNbaScheduleFallback() {
+  const start = new Date(Date.now() - (14 * 24 * 60 * 60 * 1000));
+  const seasonStart = new Date(NBA_SEASON_START);
+  const end = new Date(NBA_SEASON_END);
+  const current = start > seasonStart ? start : seasonStart;
+  const dates = [];
+  const gameMap = new Map();
+
+  while (current <= end) {
+    dates.push(new Date(current));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  const payloads = await Promise.all(dates.map(date => fetchEspnNbaScoreboardForDate(date)));
+  payloads.forEach(payload => {
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    events.forEach(event => {
+      const game = normalizeEspnNbaGame(event);
+      if (game?.gameCode) gameMap.set(game.gameCode, game);
+    });
+  });
+
+  return Array.from(gameMap.values());
 }
 
 async function fetchNbaStandings() {
@@ -518,13 +604,15 @@ async function fetchNbaPlayerStats() {
 }
 
 async function buildNbaLiveData() {
-  const [standingsData, seasonGames] = await Promise.all([
+  const [standingsData, seasonGames, fallbackGames] = await Promise.all([
     fetchNbaStandings(),
-    fetchNbaSchedule().catch(() => [])
+    fetchNbaSchedule().catch(() => []),
+    fetchNbaScheduleFallback().catch(() => [])
   ]);
   const todayGames = await fetchNbaTodayLive().catch(() => []);
+  const seasonSchedule = seasonGames.length ? seasonGames : fallbackGames;
   const gamesMap = {};
-  for (const g of seasonGames) gamesMap[g.gameCode] = g;
+  for (const g of seasonSchedule) gamesMap[g.gameCode] = g;
   for (const g of todayGames) gamesMap[g.gameCode] = { ...(gamesMap[g.gameCode] || {}), ...g };
   const allGames = Object.values(gamesMap);
   const anyLive = allGames.some(g => g.live);

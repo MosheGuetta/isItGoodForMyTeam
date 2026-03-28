@@ -415,6 +415,7 @@ function goToCompetitionSelect() {
   APP.selectedGoal = null;
   APP.selectedCompetition = null;
   APP.currentScreen = 'competition';
+  clearAppPanels();
   renderTeamGrid();
   renderScreen();
 }
@@ -472,6 +473,7 @@ async function selectCompetition(comp) {
   APP.selectedCompetition = comp;
   APP.selectedTeam = null;
   APP.selectedGoal = null;
+  clearAppPanels();
   // Highlight selected card
   document.querySelectorAll('.competition-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('comp-' + comp)?.classList.add('selected');
@@ -512,6 +514,7 @@ async function logout() {
   APP.selectedGoal = null;
   APP.selectedCompetition = null;
   APP.currentScreen = 'auth';
+  clearAppPanels();
   renderTeamGrid();
   renderScreen();
   setAuthMode('login');
@@ -542,8 +545,10 @@ function getTeam(c) {
 }
 function clubOf(c) {
   const code = normalizeTeamCode(c);
-  if (isNBA()) return NBA_CLUBS[code] || { abbr: code, name: code, logo: '' };
-  return APP.clubs[code] || { abbr: code, name: code, logo: '' };
+  const euroleagueClub = APP.clubs?.[code] || null;
+  const shouldUseNbaClub = isNBA() || (!euroleagueClub && NBA_CLUBS[code]);
+  if (shouldUseNbaClub) return NBA_CLUBS[code] || { abbr: code, name: code, logo: '' };
+  return euroleagueClub || { abbr: code, name: code, logo: '' };
 }
 function displayTeamName(c) { return teamLabel(c); }
 function competitionRoundLabel() { return isNBA() ? 'Week' : 'Round'; }
@@ -2233,6 +2238,21 @@ function renderScenarios() {
   <div class="scenario-stack">${cards}</div>`;
 }
 
+function clearAppPanels() {
+  const emptyStates = {
+    'analysis-result': '',
+    'schedule-content': '<div class="no-selection">Select a team to see their schedule.</div>',
+    'scenarios-content': '<div class="no-selection">Select a team to view its scenario paths.</div>',
+    'live-results-content': '',
+    'players-content': '',
+    'standings-content': ''
+  };
+  Object.entries(emptyStates).forEach(([id, markup]) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = markup;
+  });
+}
+
 function getLiveGameWindow(daysAhead = 3) {
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -2438,10 +2458,11 @@ async function patchPlayerTeams() {
 
 function teamLabel(code) {
   const normalizedCode = normalizeTeamCode(code);
-  if (isNBA()) {
-    return clubOf(normalizedCode).name || normalizedCode;
+  const euroleagueName = TEAM_DISPLAY_NAMES?.[normalizedCode] || APP.clubs?.[normalizedCode]?.name || '';
+  if (isNBA() || (!euroleagueName && NBA_CLUBS[normalizedCode])) {
+    return NBA_CLUBS[normalizedCode]?.name || normalizedCode;
   }
-  return TEAM_DISPLAY_NAMES[normalizedCode] || clubOf(normalizedCode).name || normalizedCode;
+  return euroleagueName || normalizedCode;
 }
 
 // Start
