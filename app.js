@@ -2219,10 +2219,58 @@ function buildScenarioOutcomeText(myTeamCode, simulatedImportantGames) {
   return lines.slice(0, 5).join('\n');
 }
 
-function buildScenarioOptionText(myTeam, importantGames, simulatedImportantGames, finalStandings) {
+function buildScenarioCompetitorSnapshot(myTeam, goalRank, finalStandings) {
+  const currentCompetitorCodes = new Set(getCompetingTeamCodes(myTeam, goalRank));
+  const lowerBound = Math.max(1, goalRank - 2);
+  const upperBound = Math.min(finalStandings.length, goalRank + 2);
+  return finalStandings
+    .filter(team =>
+      team.code === myTeam.code ||
+      currentCompetitorCodes.has(team.code) ||
+      (team.rank >= lowerBound && team.rank <= upperBound)
+    )
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 7);
+}
+
+function buildScenarioConclusionText(myTeam, goalRank, goalLabel, finalStandings) {
   const myFinalRow = finalStandings.find(team => team.code === myTeam.code);
+  if (!myFinalRow) return '';
+
+  const competitorRows = buildScenarioCompetitorSnapshot(myTeam, goalRank, finalStandings);
+  const aheadRows = competitorRows.filter(team => team.rank < myFinalRow.rank);
+  const behindRows = competitorRows.filter(team => team.rank > myFinalRow.rank);
+  const aheadNames = aheadRows.map(team => team.code);
+  const behindNames = behindRows.map(team => team.code);
+
+  let reason = '';
+  if (myFinalRow.rank === goalRank) {
+    const aboveText = aheadNames.length ? `${formatTeamList(aheadNames)} stay above them` : 'nobody stays above them';
+    const belowText = behindNames.length ? `${formatTeamList(behindNames)} remain behind them` : 'the chasing pack never catches them';
+    reason = `${displayTeamName(myTeam.code)} finish ${ordinalPlace(myFinalRow.rank)} because ${aboveText} and ${belowText}.`;
+  } else if (myFinalRow.rank < goalRank) {
+    const aboveText = aheadNames.length ? `${formatTeamList(aheadNames)} are the only teams from this race above them` : 'they end up above the rest of this race';
+    const belowText = behindNames.length ? `${formatTeamList(behindNames)} stay behind them` : 'no rival from this race stays behind them';
+    reason = `${displayTeamName(myTeam.code)} finish ${ordinalPlace(myFinalRow.rank)}, inside the ${goalLabel}, because ${aboveText} while ${belowText}.`;
+  } else {
+    const aboveText = aheadNames.length ? `${formatTeamList(aheadNames)} finish ahead of them` : 'other results still push them down';
+    const belowText = behindNames.length ? `${formatTeamList(behindNames)} are the only nearby teams they still hold off` : 'they do not hold off any nearby rival';
+    reason = `${displayTeamName(myTeam.code)} finish ${ordinalPlace(myFinalRow.rank)}, outside the ${goalLabel}, because ${aboveText} while ${belowText}.`;
+  }
+
+  const cutoffPicture = competitorRows
+    .map(team => `${ordinalPlace(team.rank)} ${displayTeamName(team.code)} (${team.w}-${team.l})`)
+    .join('; ');
+
+  return `${reason}\nCutoff picture: ${cutoffPicture}.`;
+}
+
+function buildScenarioOptionText(myTeam, goalRank, goalLabel, importantGames, simulatedImportantGames, finalStandings) {
+  const myFinalRow = finalStandings.find(team => team.code === myTeam.code);
+  const outcomeText = buildScenarioOutcomeText(myTeam.code, simulatedImportantGames);
+  const conclusionText = buildScenarioConclusionText(myTeam, goalRank, goalLabel, finalStandings);
   return {
-    text: buildScenarioOutcomeText(myTeam.code, simulatedImportantGames),
+    text: [outcomeText, conclusionText].filter(Boolean).join('\n\n'),
     finalRank: myFinalRow?.rank ?? 99,
     finalRecord: myFinalRow ? `${myFinalRow.w}-${myFinalRow.l}` : formatTeamRecord(myTeam.code).replace(/[()]/g, '')
   };
@@ -2240,7 +2288,7 @@ function buildDirectedScenarioOption(myTeam, goalRank, goalLabel, remainingRound
   const simulatedImportantGames = simulatedGames.filter(game =>
     importantKeys.has(game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`)
   );
-  const option = buildScenarioOptionText(myTeam, importantGames, simulatedImportantGames, simulatedStandings);
+  const option = buildScenarioOptionText(myTeam, goalRank, goalLabel, importantGames, simulatedImportantGames, simulatedStandings);
   return {
     ...option,
     zone: scenarioZoneLabel(option.finalRank)
@@ -2273,7 +2321,7 @@ function enumerateScenarioBuckets(myTeam, goalRank, goalLabel, remainingRounds) 
     const myFinalRow = simulatedStandings.find(team => team.code === myTeam.code);
     const zone = scenarioZoneLabel(myFinalRow?.rank ?? 99);
     const simulatedImportantGames = simulatedGames.filter(game => importantKeys.has(game.gameCode || `${game.home.code}-${game.away.code}-${game.round}`));
-    const option = buildScenarioOptionText(myTeam, importantGames, simulatedImportantGames, simulatedStandings);
+    const option = buildScenarioOptionText(myTeam, goalRank, goalLabel, importantGames, simulatedImportantGames, simulatedStandings);
     const bucket = buckets[zone];
     bucket.count += 1;
     if (!bucket.options.has(option.text)) {
